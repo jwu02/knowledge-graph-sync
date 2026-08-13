@@ -1,0 +1,9 @@
+{
+  "id": "knowledge-graph-sync",
+  "name": "Knowledge Graph Sync",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Sync a minimal note metadata snapshot to MongoDB for an external knowledge graph.",
+  "author": "",
+  "isDesktopOnly": true
+}
