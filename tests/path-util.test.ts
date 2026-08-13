@@ -1,20 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { stripMarkdownExtension } from "../path-util";
+import { basenameWithoutExtension } from "../path-util";
 
-describe("stripMarkdownExtension", () => {
-  it("strips the .md extension from a nested path, keeping the directory", () => {
-    expect(stripMarkdownExtension("Projects/My Note.md")).toBe("Projects/My Note");
+describe("basenameWithoutExtension", () => {
+  it("returns the basename without the .md extension for a nested path", () => {
+    expect(basenameWithoutExtension("Projects/My Note.md")).toBe("My Note");
   });
 
-  it("strips the .md extension from a root-level path", () => {
-    expect(stripMarkdownExtension("A.md")).toBe("A");
+  it("returns the name without the .md extension for a root-level path", () => {
+    expect(basenameWithoutExtension("A.md")).toBe("A");
   });
 
-  it("leaves non-markdown paths unchanged", () => {
-    expect(stripMarkdownExtension("image.png")).toBe("image.png");
+  it("strips only the trailing .md extension from the basename", () => {
+    expect(basenameWithoutExtension("a.md.md")).toBe("a.md");
   });
 
-  it("strips only the trailing .md extension", () => {
-    expect(stripMarkdownExtension("a.md.md")).toBe("a.md");
+  it("leaves non-markdown basenames unchanged", () => {
+    expect(basenameWithoutExtension("assets/logo.png")).toBe("logo.png");
   });
 });

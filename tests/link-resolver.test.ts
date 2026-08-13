@@ -35,12 +35,12 @@ describe("resolveLinks", () => {
     expect(resolveLinks(a, cache)).toEqual(["B"]);
   });
 
-  it("returns the full directory path without the .md extension", () => {
+  it("returns the target basename without directory or .md extension", () => {
     const a = makeFile("Projects/A.md");
     const b = makeFile("Projects/Sub/B.md");
     const cache = makeCache([{ link: "Projects/Sub/B", original: "[[Projects/Sub/B]]" }], [a, b]);
 
-    expect(resolveLinks(a, cache)).toEqual(["Projects/Sub/B"]);
+    expect(resolveLinks(a, cache)).toEqual(["B"]);
   });
 
   it("excludes unresolved links", () => {

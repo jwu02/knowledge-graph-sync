@@ -9,9 +9,9 @@ Obsidian plugin (TypeScript) that syncs a minimal metadata snapshot of a vault's
 The data contract with the website — one document per markdown note, in the `notes` collection:
 
 ```ts
-{ filename: string;   // vault-relative path, forward slashes, no .md extension — the graph node id / MongoDB key
+{ filename: string;   // note basename — no directory, no .md extension — the graph node id / MongoDB key
   createdAt: Date;    // file creation date
-  links: string[] }   // outgoing wikilinks resolved to existing markdown target filenames (same extensionless format)
+  links: string[] }   // outgoing wikilinks resolved to existing markdown target basenames (same format)
 ```
 
 The authoritative design spec is `docs/superpowers/specs/2026-08-13-obsidian-sync-design.md`; the implementation plan is `docs/superpowers/plans/2026-08-13-obsidian-sync.md`. Keep both in sync when behavior changes.
@@ -38,7 +38,7 @@ main.ts (plugin command)
   → runSync() in sync.ts          // orchestrator
       → buildSnapshot() in sync.ts  // pure-ish: Vault + MetadataCache → NoteSnapshot[]
           → resolveCreatedAt() in date-util.ts   // stat.ctime → stat.mtime → now
-          → resolveLinks() in link-resolver.ts   // metadataCache links → resolved extensionless targets
+          → resolveLinks() in link-resolver.ts   // metadataCache links → resolved basename targets
   → mongoStore.syncNotes() in mongo.ts  // bulkWrite replaceOne upserts + deleteMany of missing
   → Notice with {inserted, updated, deleted, errors}
 ```
@@ -54,6 +54,7 @@ Key seams that make this testable outside Obsidian:
 
 - **Empty-snapshot safety guard.** If `buildSnapshot` finds no markdown files in the configured subdirectory, `runSync` returns an error and skips the sync — `syncNotes` is never called. This prevents an accidental wipe of the collection via `deleteMany` with an empty `$nin`.
 - **Exclusive collection ownership.** The plugin deletes any `notes` documents whose `filename` isn't in the current snapshot, so it expects sole ownership of that collection. Documented in README.
+- **Basename-only node ids.** `filename` and `links` are note basenames (directory and `.md` stripped). Two notes with the same basename in different folders produce the same node id, and one overwrites the other in MongoDB.
 - **Only resolved markdown wikilinks sync.** `resolveLinks` uses `metadataCache.getFirstLinkpathDest(link.link, file.path)`; unresolved targets and non-`.md` targets (images, PDFs, `![[embeds]]`) are dropped. Links pointing outside the configured subdirectory are kept as-is, which can create dangling edges in the graph.
 - **Date resolution.** `stat.ctime` is the preferred creation time; falls back to `stat.mtime`, then current date, with verbose-mode console logging for fallbacks.
 

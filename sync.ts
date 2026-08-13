@@ -2,7 +2,7 @@ import type { MetadataCache, TFile, Vault } from "obsidian";
 import { resolveCreatedAt } from "./date-util";
 import { resolveLinks } from "./link-resolver";
 import type { MongoStore } from "./mongo";
-import { stripMarkdownExtension } from "./path-util";
+import { basenameWithoutExtension } from "./path-util";
 import type { NoteSnapshot, SyncResult, SyncSettings } from "./types";
 
 function normalizeSubdir(subdir: string): string {
@@ -35,7 +35,7 @@ export function buildSnapshot(
       );
       const links = resolveLinks(file, metadataCache);
       snapshot.push({
-        filename: stripMarkdownExtension(file.path),
+        filename: basenameWithoutExtension(file.path),
         createdAt,
         links,
       });

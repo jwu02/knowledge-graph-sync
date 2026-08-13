@@ -67,6 +67,20 @@ describe("buildSnapshot", () => {
     expect(snapshot[1].links).toEqual([]);
   });
 
+  it("uses the note basename without directory as the filename", () => {
+    const a = makeFile("Projects/Sub/A.md");
+    const b = makeFile("Projects/Sub/B.md");
+    const vault = makeVault([a, b]);
+    const cache = makeCache(
+      { "Projects/Sub/A.md": [{ link: "Projects/Sub/B", original: "[[Projects/Sub/B]]" }] },
+      [a, b]
+    );
+
+    const { snapshot } = buildSnapshot(vault, cache, baseSettings);
+    expect(snapshot[0].filename).toBe("A");
+    expect(snapshot[0].links).toEqual(["B"]);
+  });
+
   it("filters by subdirectory", () => {
     const a = makeFile("Projects/A.md");
     const b = makeFile("Notes/B.md");
@@ -78,7 +92,7 @@ describe("buildSnapshot", () => {
       subdir: "Projects",
     });
 
-    expect(snapshot.map((s) => s.filename)).toEqual(["Projects/A"]);
+    expect(snapshot.map((s) => s.filename)).toEqual(["A"]);
   });
 
   it("reports errors for malformed files without crashing", () => {

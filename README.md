@@ -25,7 +25,7 @@ npm test
 
 ## Notes
 
-- Graph node ids (`filename`) and `links` are stored as vault-relative paths without the `.md` extension, e.g. `Projects/My Note`.
+- Graph node ids (`filename`) and `links` are stored as note basenames — no directory, no `.md` extension — e.g. `My Note`. Two notes with the same name in different folders produce the same node id, so one overwrites the other in MongoDB.
 - Only resolved markdown wikilinks are synced.
 - Files removed from the vault are removed from MongoDB on the next sync.
 - This plugin writes to the `notes` collection and removes documents that no longer exist in the synced vault subdirectory — it expects exclusive ownership of that collection.

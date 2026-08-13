@@ -14,7 +14,7 @@
 
 - One document per markdown note in the MongoDB `notes` collection.
 - Document shape: `{ filename: string; createdAt: Date; links: string[] }`.
-- `filename` is the vault-relative path with forward slashes and the `.md` extension stripped, e.g. `Projects/My Note`.
+- `filename` is the note basename without directory or `.md` extension, e.g. `My Note`.
 - `createdAt` uses `TFile.stat.ctime` as the birthtime equivalent; falls back to `stat.mtime` if `ctime` is unavailable/invalid.
 - `links` are resolved, existing markdown targets in the same filename format; unresolved and non-markdown targets are excluded.
 - Sync is triggered by a single manual Obsidian command.
@@ -514,7 +514,7 @@ Expected: PASS.
 
 ```ts
 import type { MetadataCache, TFile } from "obsidian";
-import { stripMarkdownExtension } from "./path-util";
+import { basenameWithoutExtension } from "./path-util";
 
 export function resolveLinks(
   file: TFile,
@@ -531,7 +531,7 @@ export function resolveLinks(
     // to the destination TFile; returns null when the target does not exist.
     const target = metadataCache.getFirstLinkpathDest(link.link, file.path);
     if (target && target.extension === "md") {
-      result.push(stripMarkdownExtension(target.path));
+      result.push(basenameWithoutExtension(target.path));
     }
   }
   return result;
@@ -644,7 +644,7 @@ import type { MetadataCache, TFile, Vault } from "obsidian";
 import { resolveCreatedAt } from "./date-util";
 import { resolveLinks } from "./link-resolver";
 import type { MongoStore } from "./mongo";
-import { stripMarkdownExtension } from "./path-util";
+import { basenameWithoutExtension } from "./path-util";
 import type { NoteSnapshot, SyncResult, SyncSettings } from "./types";
 
 function normalizeSubdir(subdir: string): string {
@@ -677,7 +677,7 @@ export function buildSnapshot(
       );
       const links = resolveLinks(file, metadataCache);
       snapshot.push({
-        filename: stripMarkdownExtension(file.path),
+        filename: basenameWithoutExtension(file.path),
         createdAt,
         links,
       });
@@ -806,7 +806,7 @@ describe("buildSnapshot", () => {
       subdir: "Projects",
     });
 
-    expect(snapshot.map((s) => s.filename)).toEqual(["Projects/A"]);
+    expect(snapshot.map((s) => s.filename)).toEqual(["A"]);
   });
 
   it("reports errors for malformed files without crashing", () => {
@@ -1262,7 +1262,7 @@ git commit -m "chore: production build config and documentation"
 
 - ✅ One document per markdown note in `notes` collection — implemented in `MongoStore.syncNotes`.
 - ✅ Document shape `{ filename, createdAt, links }` — defined in `types.ts` and used in snapshot builder.
-- ✅ Vault-relative `filename` without `.md` extension — `stripMarkdownExtension(TFile.path)`.
+- ✅ Basename `filename` without directory or `.md` extension — `basenameWithoutExtension(TFile.path)`.
 - ✅ `createdAt` from `ctime` falling back to `mtime` — `resolveCreatedAt`.
 - ✅ `links` resolved to existing markdown targets — `resolveLinks`.
 - ✅ Manual sync command — registered in `main.ts`.
