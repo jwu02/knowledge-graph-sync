@@ -1,6 +1,6 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type { SyncSettings } from "./types";
-import KnowledgeGraphSyncPlugin from "./main";
+import type KnowledgeGraphSyncPlugin from "./main";
 
 export const DEFAULT_SETTINGS: SyncSettings = {
   mongoUri: "",
