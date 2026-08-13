@@ -1,9 +1,8 @@
-import type { MetadataCache, TFile, Vault } from "obsidian";
+import type { MetadataCache, TFile } from "obsidian";
 
 export function resolveLinks(
   file: TFile,
-  metadataCache: MetadataCache,
-  vault: Vault
+  metadataCache: MetadataCache
 ): string[] {
   const cache = metadataCache.getCache(file.path);
   if (!cache?.links) {
@@ -12,11 +11,10 @@ export function resolveLinks(
 
   const result: string[] = [];
   for (const link of cache.links) {
-    const target = vault.getAbstractFileByPath(link.link);
-    // TFile is a type-only import (obsidian ships no runtime exports), so
-    // `instanceof TFile` would throw ReferenceError. Use a structural check:
-    // a markdown file has an `extension` property equal to "md".
-    if (target && "extension" in target && target.extension === "md") {
+    // Resolves extensionless basenames, folder-relative paths, and aliases
+    // to the destination TFile; returns null when the target does not exist.
+    const target = metadataCache.getFirstLinkpathDest(link.link, file.path);
+    if (target && target.extension === "md") {
       result.push(target.path);
     }
   }

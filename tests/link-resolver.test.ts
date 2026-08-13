@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { resolveLinks } from "../link-resolver";
-import type { MetadataCache, TFile, Vault } from "obsidian";
+import type { MetadataCache, TFile } from "obsidian";
 
 function makeFile(path: string, extension = "md"): TFile {
   return {
@@ -13,56 +13,55 @@ function makeFile(path: string, extension = "md"): TFile {
   } as unknown as TFile;
 }
 
-function makeVault(files: TFile[]): Vault {
-  return {
-    getAbstractFileByPath: (path: string) =>
-      files.find((f) => f.path === path) || null,
-  } as unknown as Vault;
-}
-
-function makeCache(links: Array<{ link: string; original: string }>): MetadataCache {
+function makeCache(
+  links: Array<{ link: string; original: string }>,
+  files: TFile[]
+): MetadataCache {
   return {
     getCache: () => ({ links }),
+    getFirstLinkpathDest: (linkPath: string) =>
+      files.find(
+        (f) => f.path === linkPath || f.path === `${linkPath}.md`
+      ) || null,
   } as unknown as MetadataCache;
 }
 
 describe("resolveLinks", () => {
-  it("returns resolved markdown link targets", () => {
+  it("returns resolved markdown link targets (extensionless link)", () => {
     const a = makeFile("A.md");
     const b = makeFile("B.md");
-    const vault = makeVault([a, b]);
-    const cache = makeCache([{ link: "B.md", original: "[[B]]" }]);
+    const cache = makeCache([{ link: "B", original: "[[B]]" }], [a, b]);
 
-    expect(resolveLinks(a, cache, vault)).toEqual(["B.md"]);
+    expect(resolveLinks(a, cache)).toEqual(["B.md"]);
   });
 
   it("excludes unresolved links", () => {
     const a = makeFile("A.md");
-    const vault = makeVault([a]);
-    const cache = makeCache([{ link: "Missing.md", original: "[[Missing]]" }]);
+    const cache = makeCache([{ link: "Missing", original: "[[Missing]]" }], [a]);
 
-    expect(resolveLinks(a, cache, vault)).toEqual([]);
+    expect(resolveLinks(a, cache)).toEqual([]);
   });
 
   it("excludes non-markdown targets", () => {
     const a = makeFile("A.md");
     const img = makeFile("image.png", "png");
-    const vault = makeVault([a, img]);
-    const cache = makeCache([{ link: "image.png", original: "![[image.png]]" }]);
+    const cache = makeCache([{ link: "image.png", original: "![[image.png]]" }], [a, img]);
 
-    expect(resolveLinks(a, cache, vault)).toEqual([]);
+    expect(resolveLinks(a, cache)).toEqual([]);
   });
 
   it("returns multiple links in order", () => {
     const a = makeFile("A.md");
     const b = makeFile("B.md");
     const c = makeFile("C.md");
-    const vault = makeVault([a, b, c]);
-    const cache = makeCache([
-      { link: "B.md", original: "[[B]]" },
-      { link: "C.md", original: "[[C]]" },
-    ]);
+    const cache = makeCache(
+      [
+        { link: "B", original: "[[B]]" },
+        { link: "C", original: "[[C]]" },
+      ],
+      [a, b, c]
+    );
 
-    expect(resolveLinks(a, cache, vault)).toEqual(["B.md", "C.md"]);
+    expect(resolveLinks(a, cache)).toEqual(["B.md", "C.md"]);
   });
 });
