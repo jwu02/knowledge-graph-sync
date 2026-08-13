@@ -31,16 +31,16 @@ describe("MongoStore", () => {
 
   it("upserts notes and deletes missing ones", async () => {
     const first = await store.syncNotes([
-      { filename: "A.md", createdAt: new Date("2024-01-01"), links: ["B.md"] },
-      { filename: "B.md", createdAt: new Date("2024-01-02"), links: [] },
+      { filename: "A", createdAt: new Date("2024-01-01"), links: ["B"] },
+      { filename: "B", createdAt: new Date("2024-01-02"), links: [] },
     ]);
     expect(first.inserted).toBe(2);
     expect(first.updated).toBe(0);
     expect(first.deleted).toBe(0);
 
     const second = await store.syncNotes([
-      { filename: "A.md", createdAt: new Date("2024-01-01"), links: ["C.md"] },
-      { filename: "C.md", createdAt: new Date("2024-01-03"), links: [] },
+      { filename: "A", createdAt: new Date("2024-01-01"), links: ["C"] },
+      { filename: "C", createdAt: new Date("2024-01-03"), links: [] },
     ]);
     expect(second.inserted).toBe(1);
     expect(second.updated).toBe(1);

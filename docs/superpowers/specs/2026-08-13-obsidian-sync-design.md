@@ -14,13 +14,13 @@ The website expects the `notes` collection (database: `env.ACTIVITY_DB_NAME`, de
 
 ```ts
 {
-  filename: string;   // vault-relative path with forward slashes and .md extension
+  filename: string;   // vault-relative path with forward slashes, no .md extension
   createdAt: Date;    // file creation date
   links: string[];    // outgoing wikilinks resolved to target filenames
 }
 ```
 
-- `filename` is the unique key and graph node id, e.g. `Projects/My Note.md`.
+- `filename` is the unique key and graph node id, e.g. `Projects/My Note` (the vault-relative path with the `.md` extension stripped).
 - `createdAt` uses Obsidian’s `TFile.stat.ctime` as the filesystem birthtime equivalent; falls back to `mtime` if `ctime` is unavailable/invalid.
 - `links` contains only resolved, existing markdown targets in the same filename format.
 
@@ -72,7 +72,7 @@ Stored in Obsidian’s plugin data JSON.
 - Loads settings.
 - Lists markdown files under the configured subdirectory.
 - For each file:
-  - Computes `filename` (vault-relative, forward slashes, `.md`).
+  - Computes `filename` (vault-relative, forward slashes, `.md` extension stripped).
   - Computes `createdAt` from `TFile.stat` using `ctime` (birthtime equivalent) → `mtime`; logs which was used if verbose.
   - Resolves outgoing links via `metadataCache.getCache(path).links`, keeping only those whose target exists in the vault and is a markdown file.
 - Compares the computed snapshot with the existing MongoDB state:
@@ -92,7 +92,7 @@ Stored in Obsidian’s plugin data JSON.
 - Reads `metadataCache.getCache(file.path).links || []`.
 - Resolves each target via `metadataCache.getFirstLinkpathDest(link.link, file.path)`, which returns `null` for unresolved targets.
 - Keeps only resolved targets whose `TFile.extension` is `md`; excludes non-markdown targets (e.g. images, PDFs).
-- Produces vault-relative `.md` filenames.
+- Produces vault-relative filenames without the `.md` extension.
 
 ## Data Flow
 
@@ -103,9 +103,9 @@ Normal sync (manual command):
 3. Plugin opens the MongoDB client (or reuses an existing one).
 4. `runSync` collects all `.md` files under the configured subdirectory using `vault.getMarkdownFiles()` and filtering by path prefix.
 5. For each file:
-   - `filename` = `file.path`.
+   - `filename` = `file.path` with the `.md` extension stripped.
    - `createdAt` = `stat.ctime` falling back to `stat.mtime`.
-   - `links` = resolved, existing-markdown targets.
+   - `links` = resolved, existing-markdown targets in the same extensionless format.
 6. `MongoStore.syncNotes(snapshot)` performs a bulk write:
    - `replaceOne({ filename }, note, { upsert: true })` for every snapshot entry.
    - `deleteMany({ filename: { $nin: snapshotFilenames } })` to remove stale documents.
@@ -114,7 +114,7 @@ Normal sync (manual command):
 ### Link resolution detail
 
 - Obsidian’s `metadataCache` resolves `[[Alias|display]]` to the canonical file path when an alias exists.
-- We resolve each `link.link` (an extensionless destination, folder-relative path, or alias) through `metadataCache.getFirstLinkpathDest(link.link, file.path)`, which returns the destination `TFile` or `null` for unresolved targets. If it returns a `TFile` with `.md` extension, we include its path.
+- We resolve each `link.link` (an extensionless destination, folder-relative path, or alias) through `metadataCache.getFirstLinkpathDest(link.link, file.path)`, which returns the destination `TFile` or `null` for unresolved targets. If it returns a `TFile` with `.md` extension, we include its path with the extension stripped, matching the `filename` node-id format.
 - Embedded files (`![[...]]`) are excluded because they live in `embeds`, not `links`.
 - Unresolved links to notes that do not yet exist are excluded.
 

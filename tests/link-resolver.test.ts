@@ -32,7 +32,15 @@ describe("resolveLinks", () => {
     const b = makeFile("B.md");
     const cache = makeCache([{ link: "B", original: "[[B]]" }], [a, b]);
 
-    expect(resolveLinks(a, cache)).toEqual(["B.md"]);
+    expect(resolveLinks(a, cache)).toEqual(["B"]);
+  });
+
+  it("returns the full directory path without the .md extension", () => {
+    const a = makeFile("Projects/A.md");
+    const b = makeFile("Projects/Sub/B.md");
+    const cache = makeCache([{ link: "Projects/Sub/B", original: "[[Projects/Sub/B]]" }], [a, b]);
+
+    expect(resolveLinks(a, cache)).toEqual(["Projects/Sub/B"]);
   });
 
   it("excludes unresolved links", () => {
@@ -62,7 +70,7 @@ describe("resolveLinks", () => {
       [a, b, c]
     );
 
-    expect(resolveLinks(a, cache)).toEqual(["B.md", "C.md"]);
+    expect(resolveLinks(a, cache)).toEqual(["B", "C"]);
   });
 
   it("deduplicates duplicate occurrences of the same link", () => {
@@ -76,6 +84,6 @@ describe("resolveLinks", () => {
       [a, b]
     );
 
-    expect(resolveLinks(a, cache)).toEqual(["B.md"]);
+    expect(resolveLinks(a, cache)).toEqual(["B"]);
   });
 });

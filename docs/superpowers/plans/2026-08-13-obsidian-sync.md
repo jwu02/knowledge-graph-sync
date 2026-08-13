@@ -14,7 +14,7 @@
 
 - One document per markdown note in the MongoDB `notes` collection.
 - Document shape: `{ filename: string; createdAt: Date; links: string[] }`.
-- `filename` is the vault-relative path with forward slashes and `.md` extension, e.g. `Projects/My Note.md`.
+- `filename` is the vault-relative path with forward slashes and the `.md` extension stripped, e.g. `Projects/My Note`.
 - `createdAt` uses `TFile.stat.ctime` as the birthtime equivalent; falls back to `stat.mtime` if `ctime` is unavailable/invalid.
 - `links` are resolved, existing markdown targets in the same filename format; unresolved and non-markdown targets are excluded.
 - Sync is triggered by a single manual Obsidian command.
@@ -38,6 +38,7 @@ knowledge-graph-sync/
 ├── sync.ts                 # Snapshot builder + runSync orchestrator
 ├── mongo.ts                # MongoDB client wrapper
 ├── link-resolver.ts        # Obsidian metadataCache → link filenames
+├── path-util.ts            # filename/extension helpers
 ├── date-util.ts            # ctime/mtime fallback helper
 ├── types.ts                # Shared TypeScript interfaces
 ├── README.md
@@ -513,6 +514,7 @@ Expected: PASS.
 
 ```ts
 import type { MetadataCache, TFile } from "obsidian";
+import { stripMarkdownExtension } from "./path-util";
 
 export function resolveLinks(
   file: TFile,
@@ -529,7 +531,7 @@ export function resolveLinks(
     // to the destination TFile; returns null when the target does not exist.
     const target = metadataCache.getFirstLinkpathDest(link.link, file.path);
     if (target && target.extension === "md") {
-      result.push(target.path);
+      result.push(stripMarkdownExtension(target.path));
     }
   }
   return result;
@@ -575,7 +577,7 @@ describe("resolveLinks", () => {
     const b = makeFile("B.md");
     const cache = makeCache([{ link: "B", original: "[[B]]" }], [a, b]);
 
-    expect(resolveLinks(a, cache)).toEqual(["B.md"]);
+    expect(resolveLinks(a, cache)).toEqual(["B"]);
   });
 
   it("excludes unresolved links", () => {
@@ -605,7 +607,7 @@ describe("resolveLinks", () => {
       [a, b, c]
     );
 
-    expect(resolveLinks(a, cache)).toEqual(["B.md", "C.md"]);
+    expect(resolveLinks(a, cache)).toEqual(["B", "C"]);
   });
 });
 ```
@@ -642,6 +644,7 @@ import type { MetadataCache, TFile, Vault } from "obsidian";
 import { resolveCreatedAt } from "./date-util";
 import { resolveLinks } from "./link-resolver";
 import type { MongoStore } from "./mongo";
+import { stripMarkdownExtension } from "./path-util";
 import type { NoteSnapshot, SyncResult, SyncSettings } from "./types";
 
 function normalizeSubdir(subdir: string): string {
@@ -673,7 +676,11 @@ export function buildSnapshot(
         settings.verbose
       );
       const links = resolveLinks(file, metadataCache);
-      snapshot.push({ filename: file.path, createdAt, links });
+      snapshot.push({
+        filename: stripMarkdownExtension(file.path),
+        createdAt,
+        links,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       errors.push(`Failed to process ${file.path}: ${message}`);
@@ -780,11 +787,11 @@ describe("buildSnapshot", () => {
     expect(errors).toEqual([]);
     expect(snapshot).toHaveLength(2);
     expect(snapshot[0]).toEqual({
-      filename: "A.md",
+      filename: "A",
       createdAt: new Date(1700000000000),
-      links: ["B.md"],
+      links: ["B"],
     });
-    expect(snapshot[1].filename).toBe("B.md");
+    expect(snapshot[1].filename).toBe("B");
     expect(snapshot[1].links).toEqual([]);
   });
 
@@ -799,7 +806,7 @@ describe("buildSnapshot", () => {
       subdir: "Projects",
     });
 
-    expect(snapshot.map((s) => s.filename)).toEqual(["Projects/A.md"]);
+    expect(snapshot.map((s) => s.filename)).toEqual(["Projects/A"]);
   });
 
   it("reports errors for malformed files without crashing", () => {
@@ -816,7 +823,7 @@ describe("buildSnapshot", () => {
     } as unknown as MetadataCache;
 
     const { snapshot, errors } = buildSnapshot(vault, cache, baseSettings);
-    expect(snapshot.map((s) => s.filename)).toEqual(["A.md"]);
+    expect(snapshot.map((s) => s.filename)).toEqual(["A"]);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("Bad.md");
     expect(errors[0]).toContain("metadata cache failure");
@@ -860,7 +867,7 @@ describe("runSync", () => {
     const result = await runSync(vault, cache, store, baseSettings);
 
     expect(store.syncNotes).toHaveBeenCalledWith([
-      { filename: "A.md", createdAt: new Date(1700000000000), links: [] },
+      { filename: "A", createdAt: new Date(1700000000000), links: [] },
     ]);
     expect(result).toEqual({ inserted: 1, updated: 0, deleted: 0, errors: [] });
   });
@@ -1011,16 +1018,16 @@ describe("MongoStore", () => {
 
   it("upserts notes and deletes missing ones", async () => {
     const first = await store.syncNotes([
-      { filename: "A.md", createdAt: new Date("2024-01-01"), links: ["B.md"] },
-      { filename: "B.md", createdAt: new Date("2024-01-02"), links: [] },
+      { filename: "A", createdAt: new Date("2024-01-01"), links: ["B"] },
+      { filename: "B", createdAt: new Date("2024-01-02"), links: [] },
     ]);
     expect(first.inserted).toBe(2);
     expect(first.updated).toBe(0);
     expect(first.deleted).toBe(0);
 
     const second = await store.syncNotes([
-      { filename: "A.md", createdAt: new Date("2024-01-01"), links: ["C.md"] },
-      { filename: "C.md", createdAt: new Date("2024-01-03"), links: [] },
+      { filename: "A", createdAt: new Date("2024-01-01"), links: ["C"] },
+      { filename: "C", createdAt: new Date("2024-01-03"), links: [] },
     ]);
     expect(second.inserted).toBe(1);
     expect(second.updated).toBe(1);
@@ -1255,7 +1262,7 @@ git commit -m "chore: production build config and documentation"
 
 - ✅ One document per markdown note in `notes` collection — implemented in `MongoStore.syncNotes`.
 - ✅ Document shape `{ filename, createdAt, links }` — defined in `types.ts` and used in snapshot builder.
-- ✅ Vault-relative `filename` with `.md` — `TFile.path` is used directly.
+- ✅ Vault-relative `filename` without `.md` extension — `stripMarkdownExtension(TFile.path)`.
 - ✅ `createdAt` from `ctime` falling back to `mtime` — `resolveCreatedAt`.
 - ✅ `links` resolved to existing markdown targets — `resolveLinks`.
 - ✅ Manual sync command — registered in `main.ts`.

@@ -2,6 +2,7 @@ import type { MetadataCache, TFile, Vault } from "obsidian";
 import { resolveCreatedAt } from "./date-util";
 import { resolveLinks } from "./link-resolver";
 import type { MongoStore } from "./mongo";
+import { stripMarkdownExtension } from "./path-util";
 import type { NoteSnapshot, SyncResult, SyncSettings } from "./types";
 
 function normalizeSubdir(subdir: string): string {
@@ -33,7 +34,11 @@ export function buildSnapshot(
         settings.verbose
       );
       const links = resolveLinks(file, metadataCache);
-      snapshot.push({ filename: file.path, createdAt, links });
+      snapshot.push({
+        filename: stripMarkdownExtension(file.path),
+        createdAt,
+        links,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       errors.push(`Failed to process ${file.path}: ${message}`);

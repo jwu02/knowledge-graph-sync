@@ -1,4 +1,5 @@
 import type { MetadataCache, TFile } from "obsidian";
+import { stripMarkdownExtension } from "./path-util";
 
 export function resolveLinks(
   file: TFile,
@@ -17,7 +18,7 @@ export function resolveLinks(
     const target = metadataCache.getFirstLinkpathDest(link.link, file.path);
     if (target && target.extension === "md" && !seen.has(target.path)) {
       seen.add(target.path);
-      result.push(target.path);
+      result.push(stripMarkdownExtension(target.path));
     }
   }
   return result;

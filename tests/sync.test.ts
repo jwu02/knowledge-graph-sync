@@ -59,11 +59,11 @@ describe("buildSnapshot", () => {
     expect(errors).toEqual([]);
     expect(snapshot).toHaveLength(2);
     expect(snapshot[0]).toEqual({
-      filename: "A.md",
+      filename: "A",
       createdAt: new Date(1700000000000),
-      links: ["B.md"],
+      links: ["B"],
     });
-    expect(snapshot[1].filename).toBe("B.md");
+    expect(snapshot[1].filename).toBe("B");
     expect(snapshot[1].links).toEqual([]);
   });
 
@@ -78,7 +78,7 @@ describe("buildSnapshot", () => {
       subdir: "Projects",
     });
 
-    expect(snapshot.map((s) => s.filename)).toEqual(["Projects/A.md"]);
+    expect(snapshot.map((s) => s.filename)).toEqual(["Projects/A"]);
   });
 
   it("reports errors for malformed files without crashing", () => {
@@ -95,7 +95,7 @@ describe("buildSnapshot", () => {
     } as unknown as MetadataCache;
 
     const { snapshot, errors } = buildSnapshot(vault, cache, baseSettings);
-    expect(snapshot.map((s) => s.filename)).toEqual(["A.md"]);
+    expect(snapshot.map((s) => s.filename)).toEqual(["A"]);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("Bad.md");
     expect(errors[0]).toContain("metadata cache failure");
@@ -139,7 +139,7 @@ describe("runSync", () => {
     const result = await runSync(vault, cache, store, baseSettings);
 
     expect(store.syncNotes).toHaveBeenCalledWith([
-      { filename: "A.md", createdAt: new Date(1700000000000), links: [] },
+      { filename: "A", createdAt: new Date(1700000000000), links: [] },
     ]);
     expect(result).toEqual({ inserted: 1, updated: 0, deleted: 0, errors: [] });
   });
