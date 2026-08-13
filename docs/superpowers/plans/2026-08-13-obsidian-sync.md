@@ -162,6 +162,7 @@ const context = await esbuild.context({
   },
   entryPoints: ["main.ts"],
   bundle: true,
+  platform: "node",
   external: [
     "obsidian",
     "electron",
@@ -169,7 +170,7 @@ const context = await esbuild.context({
     "moment",
   ],
   format: "cjs",
-  target: "es2018",
+  target: "es2020",
   logLevel: "info",
   sourcemap: prod ? false : "inline",
   treeShaking: true,
@@ -1163,7 +1164,7 @@ git commit -m "feat: wire sync command into Obsidian plugin lifecycle"
 
 - [ ] **Step 1: Ensure `mongodb` is bundled and `obsidian` is external**
 
-Verify `esbuild.config.mjs` already has:
+Verify `esbuild.config.mjs` already has (from Task 1):
 
 ```js
 external: [
@@ -1175,6 +1176,8 @@ external: [
 ```
 
 `mongodb` must NOT be in this list so it is bundled.
+
+Also verify the config uses `platform: "node"` and `target: "es2020"`. This is required to bundle the `mongodb` driver: `platform: "node"` externalizes Node built-ins (`net`, `tls`, `fs`, `crypto`, …) so the emitted `main.js` can `require()` them at runtime, and `target: "es2020"` satisfies the driver's BigInt literals. Obsidian desktop plugins can `require()` Node built-ins (manifest `isDesktopOnly: true`).
 
 - [ ] **Step 2: Create `.gitignore`**
 
