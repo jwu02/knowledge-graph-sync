@@ -977,7 +977,7 @@ export class MongoStore {
 Create `tests/mongo.test.ts`:
 
 ```ts
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { MongoStore } from "../mongo";
 
