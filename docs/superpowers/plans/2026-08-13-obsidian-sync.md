@@ -511,12 +511,11 @@ Expected: PASS.
 - [ ] **Step 6: Create `link-resolver.ts`**
 
 ```ts
-import type { MetadataCache, TFile, Vault } from "obsidian";
+import type { MetadataCache, TFile } from "obsidian";
 
 export function resolveLinks(
   file: TFile,
-  metadataCache: MetadataCache,
-  vault: Vault
+  metadataCache: MetadataCache
 ): string[] {
   const cache = metadataCache.getCache(file.path);
   if (!cache?.links) {
@@ -525,8 +524,10 @@ export function resolveLinks(
 
   const result: string[] = [];
   for (const link of cache.links) {
-    const target = vault.getAbstractFileByPath(link.link);
-    if (target instanceof TFile && target.extension === "md") {
+    // Resolves extensionless basenames, folder-relative paths, and aliases
+    // to the destination TFile; returns null when the target does not exist.
+    const target = metadataCache.getFirstLinkpathDest(link.link, file.path);
+    if (target && target.extension === "md") {
       result.push(target.path);
     }
   }
@@ -541,7 +542,7 @@ Create `tests/link-resolver.test.ts`:
 ```ts
 import { describe, it, expect } from "vitest";
 import { resolveLinks } from "../link-resolver";
-import type { MetadataCache, TFile, Vault } from "obsidian";
+import type { MetadataCache, TFile } from "obsidian";
 
 function makeFile(path: string, extension = "md"): TFile {
   return {
@@ -554,57 +555,56 @@ function makeFile(path: string, extension = "md"): TFile {
   } as unknown as TFile;
 }
 
-function makeVault(files: TFile[]): Vault {
-  return {
-    getAbstractFileByPath: (path: string) =>
-      files.find((f) => f.path === path) || null,
-  } as unknown as Vault;
-}
-
-function makeCache(links: Array<{ link: string; original: string }>): MetadataCache {
+function makeCache(
+  links: Array<{ link: string; original: string }>,
+  files: TFile[]
+): MetadataCache {
   return {
     getCache: () => ({ links }),
+    getFirstLinkpathDest: (linkPath: string) =>
+      files.find(
+        (f) => f.path === linkPath || f.path === `${linkPath}.md`
+      ) || null,
   } as unknown as MetadataCache;
 }
 
 describe("resolveLinks", () => {
-  it("returns resolved markdown link targets", () => {
+  it("returns resolved markdown link targets (extensionless link)", () => {
     const a = makeFile("A.md");
     const b = makeFile("B.md");
-    const vault = makeVault([a, b]);
-    const cache = makeCache([{ link: "B.md", original: "[[B]]" }]);
+    const cache = makeCache([{ link: "B", original: "[[B]]" }], [a, b]);
 
-    expect(resolveLinks(a, cache, vault)).toEqual(["B.md"]);
+    expect(resolveLinks(a, cache)).toEqual(["B.md"]);
   });
 
   it("excludes unresolved links", () => {
     const a = makeFile("A.md");
-    const vault = makeVault([a]);
-    const cache = makeCache([{ link: "Missing.md", original: "[[Missing]]" }]);
+    const cache = makeCache([{ link: "Missing", original: "[[Missing]]" }], [a]);
 
-    expect(resolveLinks(a, cache, vault)).toEqual([]);
+    expect(resolveLinks(a, cache)).toEqual([]);
   });
 
   it("excludes non-markdown targets", () => {
     const a = makeFile("A.md");
     const img = makeFile("image.png", "png");
-    const vault = makeVault([a, img]);
-    const cache = makeCache([{ link: "image.png", original: "![[image.png]]" }]);
+    const cache = makeCache([{ link: "image.png", original: "![[image.png]]" }], [a, img]);
 
-    expect(resolveLinks(a, cache, vault)).toEqual([]);
+    expect(resolveLinks(a, cache)).toEqual([]);
   });
 
   it("returns multiple links in order", () => {
     const a = makeFile("A.md");
     const b = makeFile("B.md");
     const c = makeFile("C.md");
-    const vault = makeVault([a, b, c]);
-    const cache = makeCache([
-      { link: "B.md", original: "[[B]]" },
-      { link: "C.md", original: "[[C]]" },
-    ]);
+    const cache = makeCache(
+      [
+        { link: "B", original: "[[B]]" },
+        { link: "C", original: "[[C]]" },
+      ],
+      [a, b, c]
+    );
 
-    expect(resolveLinks(a, cache, vault)).toEqual(["B.md", "C.md"]);
+    expect(resolveLinks(a, cache)).toEqual(["B.md", "C.md"]);
   });
 });
 ```
@@ -671,7 +671,7 @@ export function buildSnapshot(
         file.path,
         settings.verbose
       );
-      const links = resolveLinks(file, metadataCache, vault);
+      const links = resolveLinks(file, metadataCache);
       snapshot.push({ filename: file.path, createdAt, links });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -743,9 +743,16 @@ function makeVault(files: TFile[]): Vault {
   } as unknown as Vault;
 }
 
-function makeCache(linksByPath: Record<string, Array<{ link: string; original: string }>>): MetadataCache {
+function makeCache(
+  linksByPath: Record<string, Array<{ link: string; original: string }>>,
+  files: TFile[]
+): MetadataCache {
   return {
     getCache: (path: string) => ({ links: linksByPath[path] || [] }),
+    getFirstLinkpathDest: (linkPath: string) =>
+      files.find(
+        (f) => f.path === linkPath || f.path === `${linkPath}.md`
+      ) || null,
   } as unknown as MetadataCache;
 }
 
@@ -761,9 +768,12 @@ describe("buildSnapshot", () => {
     const a = makeFile("A.md");
     const b = makeFile("B.md");
     const vault = makeVault([a, b]);
-    const cache = makeCache({
-      "A.md": [{ link: "B.md", original: "[[B]]" }],
-    });
+    const cache = makeCache(
+      {
+        "A.md": [{ link: "B", original: "[[B]]" }],
+      },
+      [a, b]
+    );
 
     const { snapshot, errors } = buildSnapshot(vault, cache, baseSettings);
     expect(errors).toEqual([]);
@@ -781,7 +791,7 @@ describe("buildSnapshot", () => {
     const a = makeFile("Projects/A.md");
     const b = makeFile("Notes/B.md");
     const vault = makeVault([a, b]);
-    const cache = makeCache({});
+    const cache = makeCache({}, [a, b]);
 
     const { snapshot } = buildSnapshot(vault, cache, {
       ...baseSettings,
@@ -815,7 +825,7 @@ describe("buildSnapshot", () => {
 describe("runSync", () => {
   it("returns error when MongoDB URI is missing", async () => {
     const vault = makeVault([]);
-    const cache = makeCache({});
+    const cache = makeCache({}, []);
     const store = {} as MongoStore;
 
     const result = await runSync(vault, cache, store, {
@@ -828,7 +838,7 @@ describe("runSync", () => {
 
   it("returns error when no notes are found", async () => {
     const vault = makeVault([]);
-    const cache = makeCache({});
+    const cache = makeCache({}, []);
     const store = {} as MongoStore;
 
     const result = await runSync(vault, cache, store, baseSettings);
@@ -841,7 +851,7 @@ describe("runSync", () => {
   it("calls mongoStore.syncNotes and returns counts", async () => {
     const a = makeFile("A.md");
     const vault = makeVault([a]);
-    const cache = makeCache({});
+    const cache = makeCache({}, [a]);
     const store: MongoStore = {
       syncNotes: vi.fn().mockResolvedValue({ inserted: 1, updated: 0, deleted: 0 }),
     } as unknown as MongoStore;

@@ -87,12 +87,12 @@ Stored in Obsidian’s plugin data JSON.
 - Provides `syncNotes(snapshot: NoteSnapshot[])` using `bulkWrite`.
 - Handles connection failures with a clear error message.
 
-### `resolveLinks(file, metadataCache, vault)` (link-resolver.ts)
+### `resolveLinks(file, metadataCache)` (link-resolver.ts)
 
 - Reads `metadataCache.getCache(file.path).links || []`.
-- Filters out unresolved targets (`link.path` not found in vault).
-- Filters out non-markdown targets (e.g. images, PDFs).
-- Normalizes paths to vault-relative `.md` filenames.
+- Resolves each target via `metadataCache.getFirstLinkpathDest(link.link, file.path)`, which returns `null` for unresolved targets.
+- Keeps only resolved targets whose `TFile.extension` is `md`; excludes non-markdown targets (e.g. images, PDFs).
+- Produces vault-relative `.md` filenames.
 
 ## Data Flow
 
@@ -114,7 +114,7 @@ Normal sync (manual command):
 ### Link resolution detail
 
 - Obsidian’s `metadataCache` resolves `[[Alias|display]]` to the canonical file path when an alias exists.
-- We filter `link.link` (the resolved path) against `vault.getAbstractFileByPath`; if it returns a `TFile` with `.md` extension, we include it.
+- We resolve each `link.link` (an extensionless destination, folder-relative path, or alias) through `metadataCache.getFirstLinkpathDest(link.link, file.path)`, which returns the destination `TFile` or `null` for unresolved targets. If it returns a `TFile` with `.md` extension, we include its path.
 - Embedded files (`![[...]]`) are excluded because they live in `embeds`, not `links`.
 - Unresolved links to notes that do not yet exist are excluded.
 
