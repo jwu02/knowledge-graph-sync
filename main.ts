@@ -7,6 +7,7 @@ import type { SyncSettings } from "./types";
 export default class KnowledgeGraphSyncPlugin extends Plugin {
   settings: SyncSettings;
   private mongoStore: MongoStore | null = null;
+  private mongoStoreKey: string | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -28,8 +29,15 @@ export default class KnowledgeGraphSyncPlugin extends Plugin {
   }
 
   private async getMongoStore(): Promise<MongoStore> {
+    const key = `${this.settings.mongoUri}|${this.settings.dbName}`;
+    if (this.mongoStore && this.mongoStoreKey !== key) {
+      await this.mongoStore.close();
+      this.mongoStore = null;
+      this.mongoStoreKey = null;
+    }
     if (!this.mongoStore) {
       this.mongoStore = new MongoStore(this.settings.mongoUri, this.settings.dbName);
+      this.mongoStoreKey = key;
       await this.mongoStore.connect();
     }
     return this.mongoStore;
@@ -49,6 +57,8 @@ export default class KnowledgeGraphSyncPlugin extends Plugin {
         for (const err of result.errors) {
           console.error("[Knowledge Graph Sync]", err);
         }
+        new Notice(`Sync failed with ${result.errors.length} error(s). See developer console for details.`, 8000);
+        return;
       }
 
       const message = `Synced ${result.inserted + result.updated + result.deleted} notes: ${result.inserted} added, ${result.updated} updated, ${result.deleted} removed.`;

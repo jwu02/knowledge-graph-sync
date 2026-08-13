@@ -64,4 +64,18 @@ describe("resolveLinks", () => {
 
     expect(resolveLinks(a, cache)).toEqual(["B.md", "C.md"]);
   });
+
+  it("deduplicates duplicate occurrences of the same link", () => {
+    const a = makeFile("A.md");
+    const b = makeFile("B.md");
+    const cache = makeCache(
+      [
+        { link: "B", original: "[[B]]" },
+        { link: "B", original: "[[B]]" },
+      ],
+      [a, b]
+    );
+
+    expect(resolveLinks(a, cache)).toEqual(["B.md"]);
+  });
 });
