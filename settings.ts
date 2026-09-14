@@ -7,6 +7,7 @@ export const DEFAULT_SETTINGS: SyncSettings = {
   dbName: "activity-telemetry",
   subdir: "",
   verbose: false,
+  includeUnresolved: false,
 };
 
 export class KnowledgeGraphSyncSettingTab extends PluginSettingTab {
@@ -56,6 +57,20 @@ export class KnowledgeGraphSyncSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.subdir)
           .onChange(async (value) => {
             this.plugin.settings.subdir = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Include notes that don't exist yet")
+      .setDesc(
+        "Create placeholder nodes for wikilinks whose target file hasn't been written, so the graph shows notes you've referenced but not created. Placeholders have no outgoing links, and are removed on the next sync after you turn this off."
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.includeUnresolved)
+          .onChange(async (value) => {
+            this.plugin.settings.includeUnresolved = value;
             await this.plugin.saveSettings();
           })
       );

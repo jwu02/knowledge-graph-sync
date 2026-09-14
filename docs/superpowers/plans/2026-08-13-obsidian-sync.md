@@ -10,17 +10,19 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-13-obsidian-sync-design.md`
 
+> **Amendment (2026-09-13):** An **Include notes that don't exist yet** setting was added after this plan was executed. It inverts the original "exclude unresolved targets" decision behind an opt-in toggle: `resolveLinks` became `resolveTargets` (returning `resolved` and `unresolved` buckets), and `buildSnapshot` keeps unresolved edges and emits placeholder documents when the setting is on. The code listings below remain as executed and are superseded by the spec's [Placeholder nodes](../../specs/2026-08-13-obsidian-sync-design.md#placeholder-nodes) section; the constraints and self-review entries in this document have been updated to match current behaviour.
+
 ## Global Constraints
 
 - One document per markdown note in the MongoDB `notes` collection.
 - Document shape: `{ filename: string; createdAt: Date; links: string[] }`.
 - `filename` is the note basename without directory or `.md` extension, e.g. `My Note`.
 - `createdAt` uses `TFile.stat.ctime` as the birthtime equivalent; falls back to `stat.mtime` if `ctime` is unavailable/invalid.
-- `links` are resolved, existing markdown targets in the same filename format; unresolved and non-markdown targets are excluded.
+- `links` are markdown targets in the same filename format; non-markdown targets are always excluded. Unresolved targets are excluded by default and included when **Include notes that don't exist yet** is enabled, which also emits placeholder documents for them.
 - Sync is triggered by a single manual Obsidian command.
 - Deleted vault notes are deleted from MongoDB on the next sync, unless the scanned file list is empty (safety guard).
 - Plugin does not modify the website repo.
-- MongoDB connection string, database name, vault subdirectory, and verbose logging are configurable via Obsidian settings.
+- MongoDB connection string, database name, vault subdirectory, verbose logging, and the include-notes-that-don't-exist-yet toggle are configurable via Obsidian settings.
 
 ---
 
@@ -1225,7 +1227,7 @@ npm test
 
 ## Notes
 
-- Only resolved markdown wikilinks are synced.
+- Only markdown wikilinks are synced. Unresolved ones are dropped unless the include-notes-that-don't-exist-yet setting is enabled, in which case they are kept as edges and the missing notes appear as placeholder nodes.
 - Files removed from the vault are removed from MongoDB on the next sync.
 ```
 
@@ -1264,7 +1266,7 @@ git commit -m "chore: production build config and documentation"
 - ✅ Document shape `{ filename, createdAt, links }` — defined in `types.ts` and used in snapshot builder.
 - ✅ Basename `filename` without directory or `.md` extension — `basenameWithoutExtension(TFile.path)`.
 - ✅ `createdAt` from `ctime` falling back to `mtime` — `resolveCreatedAt`.
-- ✅ `links` resolved to existing markdown targets — `resolveLinks`.
+- ✅ `links` resolved to markdown targets — `resolveTargets`, with unresolved targets opt-in via the include-notes-that-don't-exist-yet setting.
 - ✅ Manual sync command — registered in `main.ts`.
 - ✅ Delete missing notes from MongoDB — `deleteMany` in `MongoStore.syncNotes`, with empty-list safety.
 - ✅ Configurable MongoDB URI, DB name, subdirectory, verbose — settings tab.

@@ -22,7 +22,7 @@ The website expects the `notes` collection (database: `env.ACTIVITY_DB_NAME`, de
 
 - `filename` is the unique key and graph node id, e.g. `My Note` (the note basename, without directory or `.md` extension).
 - `createdAt` uses Obsidian’s `TFile.stat.ctime` as the filesystem birthtime equivalent; falls back to `mtime` if `ctime` is unavailable/invalid.
-- `links` contains only resolved, existing markdown targets in the same filename format.
+- `links` contains markdown targets in the same filename format. By default only resolved, existing targets are included; enabling **Include notes that don't exist yet** also keeps unresolved targets and emits placeholder documents for them (see [Placeholder nodes](#placeholder-nodes)).
 
 ## Architecture
 
@@ -63,6 +63,7 @@ Settings fields:
 - MongoDB connection string
 - Database name (default: `activity-telemetry`, mirroring `ACTIVITY_DB_NAME`)
 - Vault subdirectory to scan (e.g. `Projects`; empty = whole vault)
+- Include notes that don't exist yet toggle (default off) — see [Placeholder nodes](#placeholder-nodes)
 - Verbose logging toggle
 
 Stored in Obsidian’s plugin data JSON.
@@ -74,7 +75,8 @@ Stored in Obsidian’s plugin data JSON.
 - For each file:
   - Computes `filename` (note basename, `.md` extension stripped).
   - Computes `createdAt` from `TFile.stat` using `ctime` (birthtime equivalent) → `mtime`; logs which was used if verbose.
-  - Resolves outgoing links via `metadataCache.getCache(path).links`, keeping only those whose target exists in the vault and is a markdown file.
+  - Resolves outgoing links via `metadataCache.getCache(path).links` into resolved and unresolved markdown targets.
+- When **Include notes that don't exist yet** is enabled, appends unresolved targets to `links` and emits a placeholder document for each unique one whose basename no real note claims.
 - Compares the computed snapshot with the existing MongoDB state:
   - Inserts new notes.
   - Updates changed notes.
@@ -87,12 +89,25 @@ Stored in Obsidian’s plugin data JSON.
 - Provides `syncNotes(snapshot: NoteSnapshot[])` using `bulkWrite`.
 - Handles connection failures with a clear error message.
 
-### `resolveLinks(file, metadataCache)` (link-resolver.ts)
+### `resolveTargets(file, metadataCache)` (link-resolver.ts)
 
 - Reads `metadataCache.getCache(file.path).links || []`.
 - Resolves each target via `metadataCache.getFirstLinkpathDest(link.link, file.path)`, which returns `null` for unresolved targets.
-- Keeps only resolved targets whose `TFile.extension` is `md`; excludes non-markdown targets (e.g. images, PDFs).
-- Produces basenames without the `.md` extension.
+- Returns two buckets, each in document order and deduplicated by node id:
+  - `resolved` — targets that exist as markdown files. Keeps only targets whose `TFile.extension` is `md`; excludes non-markdown files (e.g. images, PDFs).
+  - `unresolved` — targets with no matching file that still look like notes. Because resolution returned `null`, markdown-ness is judged from the link text's basename: extensionless names (`[[Foo]]`) and explicit `.md` (`[[Foo.md]]`) qualify, while anything else (`[[diagram.png]]`, `[[v1.2]]`) is dropped from both buckets.
+- Produces basenames without the `.md` extension in both buckets.
+
+### Placeholder nodes
+
+Controlled by the **Include notes that don't exist yet** setting (default off).
+
+- When enabled, `buildSnapshot` extends each note's `links` with the `unresolved` bucket, so edges pointing at not-yet-written notes survive, and emits one placeholder document per unique unresolved target: `{ filename: <target>, createdAt: <sync time>, links: [] }`.
+- All placeholders in a single sync share one `createdAt`, stamped once when the snapshot is built. Since documents are replaced on every sync, this is a "last seen" time rather than a first-linked time.
+- A placeholder is skipped when its basename is already claimed by a real note, because `filename` is the node id.
+- Targets that exist but fall outside the configured subdirectory are *resolved*, not unresolved, so they remain dangling edges and never become placeholders.
+- Creating the missing note later upserts over the placeholder, since `filename` is the replacement key.
+- Turning the setting off removes placeholders on the next sync, via the ordinary `deleteMany` of filenames absent from the snapshot.
 
 ## Data Flow
 
@@ -105,7 +120,8 @@ Normal sync (manual command):
 5. For each file:
    - `filename` = basename of `file.path` with the `.md` extension stripped.
    - `createdAt` = `stat.ctime` falling back to `stat.mtime`.
-   - `links` = resolved, existing-markdown targets in the same basename format.
+   - `links` = resolved markdown targets in the same basename format, extended with unresolved targets when **Include notes that don't exist yet** is enabled.
+   - If that setting is enabled, every unresolved target whose basename no real note claims is also appended to the snapshot as a placeholder document.
 6. `MongoStore.syncNotes(snapshot)` performs a bulk write:
    - `replaceOne({ filename }, note, { upsert: true })` for every snapshot entry.
    - `deleteMany({ filename: { $nin: snapshotFilenames } })` to remove stale documents.
@@ -116,7 +132,7 @@ Normal sync (manual command):
 - Obsidian’s `metadataCache` resolves `[[Alias|display]]` to the canonical file path when an alias exists.
 - We resolve each `link.link` (an extensionless destination, folder-relative path, or alias) through `metadataCache.getFirstLinkpathDest(link.link, file.path)`, which returns the destination `TFile` or `null` for unresolved targets. If it returns a `TFile` with `.md` extension, we include its basename, matching the `filename` node-id format.
 - Embedded files (`![[...]]`) are excluded because they live in `embeds`, not `links`.
-- Unresolved links to notes that do not yet exist are excluded.
+- Unresolved links to notes that do not yet exist are excluded by default. Enabling **Include notes that don't exist yet** keeps them as edges and emits placeholder nodes; see [Placeholder nodes](#placeholder-nodes).
 
 ### Date fallback detail
 
@@ -137,6 +153,8 @@ Normal sync (manual command):
 Because `sync.ts` accepts `Vault` and `MetadataCache` interfaces, it can be unit-tested with mocks:
 
 - **Snapshot generation tests:** mock `Vault` and `MetadataCache` with a few files and links; assert the resulting `NoteSnapshot[]` has correct `filename`, `createdAt`, and resolved `links`.
+- **Link resolution tests:** assert the `resolved`/`unresolved` split, node-id normalisation, deduplication by basename, and the markdown-only filter applied to unresolved link text.
+- **Placeholder tests:** assert that enabling the setting keeps unresolved edges and emits one placeholder per unique target, that basenames claimed by real notes are skipped, and that disabling it changes nothing.
 - **Date fallback tests:** simulate `TFile.stat` objects with missing or invalid `ctime`.
 - **MongoDB integration test:** spin up `mongodb-memory-server`, call `syncNotes`, assert collection state.
 
@@ -151,7 +169,7 @@ The Obsidian plugin lifecycle and settings UI will be tested manually in Obsidia
 | Deleted notes | Delete from MongoDB | Keeps MongoDB an exact mirror of the vault subset. |
 | Link syntax | Wikilinks only via Obsidian metadata cache | Obsidian handles parsing, alias resolution, and path resolution. |
 | Alias resolution | Use Obsidian’s resolved cache | More robust than custom parsing. |
-| Unresolved targets | Exclude | Avoid creating graph nodes for notes that do not exist yet. |
+| Unresolved targets | Exclude by default; opt-in placeholder nodes | The default keeps the graph to real notes; the toggle lets notes you have referenced but not written appear as placeholder nodes. |
 | Node id format | Note basename (no directory, no `.md`) | Matches the note names shown in Obsidian; same-named notes in different folders produce the same id and collide |
 | MongoDB approach | Bundle Node.js driver | Single artifact; direct contract match; simplest operation. |
 

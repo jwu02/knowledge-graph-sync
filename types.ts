@@ -9,6 +9,8 @@ export interface SyncSettings {
   dbName: string;
   subdir: string;
   verbose: boolean;
+  /** Emit placeholder nodes (and keep the edges) for wikilinks with no file. */
+  includeUnresolved: boolean;
 }
 
 export interface SyncResult {

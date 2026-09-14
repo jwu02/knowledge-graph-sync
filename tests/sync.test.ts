@@ -41,7 +41,20 @@ const baseSettings: SyncSettings = {
   dbName: "activity-telemetry",
   subdir: "",
   verbose: false,
+  includeUnresolved: false,
 };
+
+const PLACEHOLDER_TIME = new Date("2026-09-13T12:00:00Z");
+
+function withFakeNow<T>(fn: () => T): T {
+  vi.useFakeTimers();
+  vi.setSystemTime(PLACEHOLDER_TIME);
+  try {
+    return fn();
+  } finally {
+    vi.useRealTimers();
+  }
+}
 
 describe("buildSnapshot", () => {
   it("builds a snapshot for all markdown files", () => {
@@ -114,6 +127,122 @@ describe("buildSnapshot", () => {
     expect(errors[0]).toContain("Bad.md");
     expect(errors[0]).toContain("metadata cache failure");
   });
+
+  it("omits unresolved links and adds no placeholders when disabled", () => {
+    const a = makeFile("A.md");
+    const vault = makeVault([a]);
+    const cache = makeCache(
+      { "A.md": [{ link: "Missing", original: "[[Missing]]" }] },
+      [a]
+    );
+
+    const { snapshot } = buildSnapshot(vault, cache, baseSettings);
+
+    expect(snapshot.map((s) => s.filename)).toEqual(["A"]);
+    expect(snapshot[0].links).toEqual([]);
+  });
+
+  it("keeps unresolved links as edges when enabled", () => {
+    const a = makeFile("A.md");
+    const vault = makeVault([a]);
+    const cache = makeCache(
+      { "A.md": [{ link: "Missing", original: "[[Missing]]" }] },
+      [a]
+    );
+
+    const { snapshot } = buildSnapshot(vault, cache, {
+      ...baseSettings,
+      includeUnresolved: true,
+    });
+
+    expect(snapshot[0].links).toEqual(["Missing"]);
+  });
+
+  it("creates a placeholder node for each unresolved target when enabled", () => {
+    const a = makeFile("A.md");
+    const vault = makeVault([a]);
+    const cache = makeCache(
+      { "A.md": [{ link: "Missing", original: "[[Missing]]" }] },
+      [a]
+    );
+
+    const { snapshot } = withFakeNow(() =>
+      buildSnapshot(vault, cache, { ...baseSettings, includeUnresolved: true })
+    );
+
+    expect(snapshot).toEqual([
+      {
+        filename: "A",
+        createdAt: new Date(1700000000000),
+        links: ["Missing"],
+      },
+      { filename: "Missing", createdAt: PLACEHOLDER_TIME, links: [] },
+    ]);
+  });
+
+  it("collapses a target linked from two notes into one placeholder", () => {
+    const a = makeFile("A.md");
+    const b = makeFile("B.md");
+    const vault = makeVault([a, b]);
+    const cache = makeCache(
+      {
+        "A.md": [{ link: "Missing", original: "[[Missing]]" }],
+        "B.md": [{ link: "Missing", original: "[[Missing]]" }],
+      },
+      [a, b]
+    );
+
+    const { snapshot } = withFakeNow(() =>
+      buildSnapshot(vault, cache, { ...baseSettings, includeUnresolved: true })
+    );
+
+    expect(snapshot.map((s) => s.filename)).toEqual(["A", "B", "Missing"]);
+    expect(snapshot[0].links).toEqual(["Missing"]);
+    expect(snapshot[1].links).toEqual(["Missing"]);
+  });
+
+  it("does not create a placeholder for a basename already held by a real note", () => {
+    const a = makeFile("A.md");
+    const y = makeFile("Y/Same.md");
+    const vault = makeVault([a, y]);
+    const cache = makeCache(
+      { "A.md": [{ link: "X/Same", original: "[[X/Same]]" }] },
+      [a, y]
+    );
+
+    const { snapshot } = withFakeNow(() =>
+      buildSnapshot(vault, cache, { ...baseSettings, includeUnresolved: true })
+    );
+
+    expect(snapshot.map((s) => s.filename)).toEqual(["A", "Same"]);
+    expect(snapshot[0].links).toEqual(["Same"]);
+  });
+
+  it("ignores existing notes outside the subdirectory as placeholder sources", () => {
+    const a = makeFile("Projects/A.md");
+    const outside = makeFile("Notes/B.md");
+    const vault = makeVault([a, outside]);
+    const cache = makeCache(
+      { "Projects/A.md": [{ link: "Notes/B", original: "[[Notes/B]]" }] },
+      [a, outside]
+    );
+
+    const { snapshot } = withFakeNow(() =>
+      buildSnapshot(vault, cache, {
+        ...baseSettings,
+        subdir: "Projects",
+        includeUnresolved: true,
+      })
+    );
+
+    expect(snapshot).toEqual([
+      {
+        filename: "A",
+        createdAt: new Date(1700000000000),
+        links: ["B"],
+      },
+    ]);
+  });
 });
 
 describe("runSync", () => {
@@ -140,6 +269,24 @@ describe("runSync", () => {
     expect(result.errors).toContain(
       "No markdown notes found in the configured subdirectory"
     );
+  });
+
+  it("still skips the sync for an empty vault when placeholders are enabled", async () => {
+    const vault = makeVault([]);
+    const cache = makeCache({}, []);
+    const store: MongoStore = {
+      syncNotes: vi.fn(),
+    } as unknown as MongoStore;
+
+    const result = await runSync(vault, cache, store, {
+      ...baseSettings,
+      includeUnresolved: true,
+    });
+
+    expect(result.errors).toContain(
+      "No markdown notes found in the configured subdirectory"
+    );
+    expect(store.syncNotes).not.toHaveBeenCalled();
   });
 
   it("calls mongoStore.syncNotes and returns counts", async () => {

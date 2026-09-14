@@ -1,6 +1,6 @@
 import type { MetadataCache, TFile, Vault } from "obsidian";
 import { resolveCreatedAt } from "./date-util";
-import { resolveLinks } from "./link-resolver";
+import { resolveTargets } from "./link-resolver";
 import type { MongoStore } from "./mongo";
 import { basenameWithoutExtension } from "./path-util";
 import type { NoteSnapshot, SyncResult, SyncSettings } from "./types";
@@ -26,6 +26,8 @@ export function buildSnapshot(
   );
 
   const snapshot: NoteSnapshot[] = [];
+  const unresolvedTargets = new Set<string>();
+
   for (const file of files) {
     try {
       const { date: createdAt } = resolveCreatedAt(
@@ -33,15 +35,35 @@ export function buildSnapshot(
         file.path,
         settings.verbose
       );
-      const links = resolveLinks(file, metadataCache);
+      const { resolved, unresolved } = resolveTargets(file, metadataCache);
+      if (settings.includeUnresolved) {
+        for (const target of unresolved) {
+          unresolvedTargets.add(target);
+        }
+      }
       snapshot.push({
         filename: basenameWithoutExtension(file.path),
         createdAt,
-        links,
+        links: settings.includeUnresolved
+          ? [...resolved, ...unresolved]
+          : resolved,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       errors.push(`Failed to process ${file.path}: ${message}`);
+    }
+  }
+
+  if (unresolvedTargets.size > 0) {
+    const claimed = new Set(snapshot.map((note) => note.filename));
+    const createdAt = new Date();
+    for (const target of unresolvedTargets) {
+      // A real note always wins the basename, since filename is the node id.
+      if (claimed.has(target)) {
+        continue;
+      }
+      claimed.add(target);
+      snapshot.push({ filename: target, createdAt, links: [] });
     }
   }
 
