@@ -8,18 +8,19 @@ Obsidian plugin that syncs a minimal metadata snapshot of your vault to a MongoD
 - **Database name** — defaults to `activity-telemetry`
 - **Vault subdirectory** — optional; restrict sync to one folder
 - **Include notes that don't exist yet** — optional; off by default. See below.
-- **Verbose logging** — log date fallbacks to the developer console
+- **Verbose logging** — log date fallbacks and placeholder date sources to the developer console
 
 Any of these can also be supplied by a local `.env` file — see [Setting values with .env](#setting-values-with-env).
 
 ### Include notes that don't exist yet
 
-When a note links to `[[Something You Haven't Written]]`, the link normally disappears from the sync: no edge, no node. Turn this on and the plugin instead keeps the edge and creates a **placeholder node** for the target — a document with that name, no outgoing links, and the sync time as its `createdAt` — so referenced-but-unwritten notes show up in the graph.
+When a note links to `[[Something You Haven't Written]]`, the link normally disappears from the sync: no edge, no node. Turn this on and the plugin instead keeps the edge and creates a **placeholder node** for the target — a document with that name and no outgoing links — so referenced-but-unwritten notes show up in the graph.
 
 - Only markdown-looking targets qualify. `[[Foo]]` and `[[Foo.md]]` become nodes; `[[diagram.png]]` and `[[v1.2]]` do not.
 - A placeholder never overwrites a real note: if the note exists (even outside the configured subdirectory), it stays the real note.
 - Writing the missing note later replaces its placeholder on the next sync, since the name is the document key.
 - Turning the setting back off deletes the placeholders on the next sync.
+- **Creation date**: a placeholder is dated from the notes that link to it — the earliest creation date among them, taken from that note's own date. So `[[Some Idea]]` referenced by a note from 2021 appears in the graph as a 2021 node, and the date doesn't drift as you re-sync. Notes outside the configured subdirectory are never date sources. Turn on **Verbose logging** to see which note dated each placeholder.
 
 ## Setting values with .env
 

@@ -104,8 +104,11 @@ Stored in Obsidian’s plugin data JSON, and overridable per key by a local `.en
 
 Controlled by the **Include notes that don't exist yet** setting (default off).
 
-- When enabled, `buildSnapshot` extends each note's `links` with the `unresolved` bucket, so edges pointing at not-yet-written notes survive, and emits one placeholder document per unique unresolved target: `{ filename: <target>, createdAt: <sync time>, links: [] }`.
-- All placeholders in a single sync share one `createdAt`, stamped once when the snapshot is built. Since documents are replaced on every sync, this is a "last seen" time rather than a first-linked time.
+- When enabled, `buildSnapshot` extends each note's `links` with the `unresolved` bucket, so edges pointing at not-yet-written notes survive, and emits one placeholder document per unique unresolved target: `{ filename: <target>, createdAt: <derived creation date>, links: [] }`.
+- A placeholder's `createdAt` is the earliest resolved creation date among the snapshot notes that link to its target. The winning linker's date is inherited exactly as it appears in that note's own snapshot entry — the same `ctime` → `mtime` → now rule, fallbacks included, never re-derived for the placeholder.
+- Earliest-wins aggregation makes the result independent of vault file order; ties break on the linking note's basename for the same reason. Notes outside the configured subdirectory are not in the snapshot and so can never date a placeholder.
+- Dates are recomputed from the current snapshot on every sync. This is derived data, never persisted state: the sync stays a one-way write, and no placeholder date is ever read back from MongoDB.
+- Verbose mode logs one line per placeholder naming the winning linker.
 - A placeholder is skipped when its basename is already claimed by a real note, because `filename` is the node id.
 - Targets that exist but fall outside the configured subdirectory are *resolved*, not unresolved, so they remain dangling edges and never become placeholders.
 - Creating the missing note later upserts over the placeholder, since `filename` is the replacement key.
@@ -123,7 +126,7 @@ Normal sync (manual command):
    - `filename` = basename of `file.path` with the `.md` extension stripped.
    - `createdAt` = `stat.ctime` falling back to `stat.mtime`.
    - `links` = resolved markdown targets in the same basename format, extended with unresolved targets when **Include notes that don't exist yet** is enabled.
-   - If that setting is enabled, every unresolved target whose basename no real note claims is also appended to the snapshot as a placeholder document.
+   - If that setting is enabled, every unresolved target whose basename no real note claims is also appended to the snapshot as a placeholder document, dated from the earliest resolved date among the notes that link to it.
 6. `MongoStore.syncNotes(snapshot)` performs a bulk write:
    - `replaceOne({ filename }, note, { upsert: true })` for every snapshot entry.
    - `deleteMany({ filename: { $nin: snapshotFilenames } })` to remove stale documents.
@@ -141,6 +144,7 @@ Normal sync (manual command):
 - Obsidian’s `TFile.stat` exposes `ctime` (creation time) and `mtime` (modification time). There is no separate `birthtime` field.
 - Use `stat.ctime` as the birthtime equivalent; if it is missing or invalid, fall back to `stat.mtime`.
 - In verbose mode, log: `Using mtime for Projects/Foo.md (ctime unavailable)`.
+- A placeholder node reuses whichever date its winning linker resolved to, verbatim. The fallback chain runs once, on the real note, and the placeholder never re-runs it.
 
 ## Error Handling
 
@@ -156,7 +160,7 @@ Because `sync.ts` accepts `Vault` and `MetadataCache` interfaces, it can be unit
 
 - **Snapshot generation tests:** mock `Vault` and `MetadataCache` with a few files and links; assert the resulting `NoteSnapshot[]` has correct `filename`, `createdAt`, and resolved `links`.
 - **Link resolution tests:** assert the `resolved`/`unresolved` split, node-id normalisation, deduplication by basename, and the markdown-only filter applied to unresolved link text.
-- **Placeholder tests:** assert that enabling the setting keeps unresolved edges and emits one placeholder per unique target, that basenames claimed by real notes are skipped, and that disabling it changes nothing.
+- **Placeholder tests:** assert that enabling the setting keeps unresolved edges and emits one placeholder per unique target, that basenames claimed by real notes are skipped, and that disabling it changes nothing. Dates are asserted as exact derived values: a single linker's date inherited verbatim, an mtime-only linker's date inherited as-is, the earliest of several linkers regardless of file order, and an unchanged result across repeated syncs. The fake timers are gone because the builder no longer stamps a sync time, so the expected dates are ordinary literals; the residual `new Date()` inside `resolveCreatedAt` is unreachable for fixtures that carry a valid `ctime` or `mtime`, and is a file-level fallback rather than placeholder behaviour.
 - **Date fallback tests:** simulate `TFile.stat` objects with missing or invalid `ctime`.
 - **MongoDB integration test:** spin up `mongodb-memory-server`, call `syncNotes`, assert collection state.
 
@@ -172,6 +176,7 @@ The Obsidian plugin lifecycle and settings UI will be tested manually in Obsidia
 | Link syntax | Wikilinks only via Obsidian metadata cache | Obsidian handles parsing, alias resolution, and path resolution. |
 | Alias resolution | Use Obsidian’s resolved cache | More robust than custom parsing. |
 | Unresolved targets | Exclude by default; opt-in placeholder nodes | The default keeps the graph to real notes; the toggle lets notes you have referenced but not written appear as placeholder nodes. |
+| Placeholder creation date | Earliest resolved date among the linking notes | Deterministic under vault file order, and a pure function of the current snapshot — no reads, so the sync stays a one-way write. See [ADR-0002](../../adr/0002-placeholder-dates-are-derived.md). |
 | Node id format | Note basename (no directory, no `.md`) | Matches the note names shown in Obsidian; same-named notes in different folders produce the same id and collide |
 | MongoDB approach | Bundle Node.js driver | Single artifact; direct contract match; simplest operation. |
 

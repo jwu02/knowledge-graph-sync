@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-13-obsidian-sync-design.md`
 
+> **Amendment (2026-09-22):** Placeholder nodes no longer carry the sync time. Each placeholder's `createdAt` is now the earliest resolved creation date among the snapshot notes that link to it, inherited verbatim from the winning linker (`buildSnapshot` stamps no timestamp of its own; the only remaining clock read is `resolveCreatedAt`'s `new Date()` last resort for a file with no usable stat). See [ADR-0002](../../adr/0002-placeholder-dates-are-derived.md) and the spec's [Placeholder nodes](../../specs/2026-08-13-obsidian-sync-design.md#placeholder-nodes) section.
+
 > **Amendment (2026-09-13):** An **Include notes that don't exist yet** setting was added after this plan was executed. It inverts the original "exclude unresolved targets" decision behind an opt-in toggle: `resolveLinks` became `resolveTargets` (returning `resolved` and `unresolved` buckets), and `buildSnapshot` keeps unresolved edges and emits placeholder documents when the setting is on. The code listings below remain as executed and are superseded by the spec's [Placeholder nodes](../../specs/2026-08-13-obsidian-sync-design.md#placeholder-nodes) section; the constraints and self-review entries in this document have been updated to match current behaviour.
 
 ## Global Constraints
@@ -18,7 +20,7 @@
 - Document shape: `{ filename: string; createdAt: Date; links: string[] }`.
 - `filename` is the note basename without directory or `.md` extension, e.g. `My Note`.
 - `createdAt` uses `TFile.stat.ctime` as the birthtime equivalent; falls back to `stat.mtime` if `ctime` is unavailable/invalid.
-- `links` are markdown targets in the same filename format; non-markdown targets are always excluded. Unresolved targets are excluded by default and included when **Include notes that don't exist yet** is enabled, which also emits placeholder documents for them.
+- `links` are markdown targets in the same filename format; non-markdown targets are always excluded. Unresolved targets are excluded by default and included when **Include notes that don't exist yet** is enabled, which also emits placeholder documents for them. A placeholder's `createdAt` is derived from its earliest linking note rather than stamped at sync time.
 - Sync is triggered by a single manual Obsidian command.
 - Deleted vault notes are deleted from MongoDB on the next sync, unless the scanned file list is empty (safety guard).
 - Plugin does not modify the website repo.

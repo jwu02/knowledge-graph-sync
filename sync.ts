@@ -15,6 +15,23 @@ function isUnderSubdir(path: string, subdir: string): boolean {
   return path === normalized || path.startsWith(normalized + "/");
 }
 
+/** The note that supplied an unresolved target's date, and the date it supplied. */
+interface PlaceholderSource {
+  createdAt: Date;
+  /** Linking note basename — names the winner in verbose logs. */
+  linker: string;
+}
+
+/** Should `candidate` dethrone the `incumbent` as the target's date source? */
+function supersedes(
+  candidate: PlaceholderSource,
+  incumbent: PlaceholderSource
+): boolean {
+  const delta = candidate.createdAt.getTime() - incumbent.createdAt.getTime();
+  // Ties break on the linker's name so the winner never depends on vault order.
+  return delta < 0 || (delta === 0 && candidate.linker < incumbent.linker);
+}
+
 export function buildSnapshot(
   vault: Vault,
   metadataCache: MetadataCache,
@@ -26,7 +43,7 @@ export function buildSnapshot(
   );
 
   const snapshot: NoteSnapshot[] = [];
-  const unresolvedTargets = new Set<string>();
+  const placeholderSources = new Map<string, PlaceholderSource>();
 
   for (const file of files) {
     try {
@@ -36,13 +53,20 @@ export function buildSnapshot(
         settings.verbose
       );
       const { resolved, unresolved } = resolveTargets(file, metadataCache);
+      const filename = basenameWithoutExtension(file.path);
       if (settings.includeUnresolved) {
         for (const target of unresolved) {
-          unresolvedTargets.add(target);
+          // A placeholder inherits its linker's resolved date as-is, so one
+          // date-resolution rule covers both real notes and placeholders.
+          const candidate = { createdAt, linker: filename };
+          const incumbent = placeholderSources.get(target);
+          if (!incumbent || supersedes(candidate, incumbent)) {
+            placeholderSources.set(target, candidate);
+          }
         }
       }
       snapshot.push({
-        filename: basenameWithoutExtension(file.path),
+        filename,
         createdAt,
         links: settings.includeUnresolved
           ? [...resolved, ...unresolved]
@@ -54,16 +78,22 @@ export function buildSnapshot(
     }
   }
 
-  if (unresolvedTargets.size > 0) {
+  if (placeholderSources.size > 0) {
     const claimed = new Set(snapshot.map((note) => note.filename));
-    const createdAt = new Date();
-    for (const target of unresolvedTargets) {
+    for (const [target, source] of placeholderSources) {
       // A real note always wins the basename, since filename is the node id.
       if (claimed.has(target)) {
         continue;
       }
       claimed.add(target);
-      snapshot.push({ filename: target, createdAt, links: [] });
+      if (settings.verbose) {
+        console.log(`Dating placeholder ${target} from ${source.linker}`);
+      }
+      snapshot.push({
+        filename: target,
+        createdAt: source.createdAt,
+        links: [],
+      });
     }
   }
 

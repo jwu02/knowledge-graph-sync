@@ -2,13 +2,19 @@ import { describe, it, expect, vi } from "vitest";
 import { buildSnapshot, runSync } from "../sync";
 import type { MetadataCache, TFile, Vault } from "obsidian";
 import type { MongoStore } from "../mongo";
-import type { SyncSettings } from "../types";
+import type { NoteSnapshot, SyncSettings } from "../types";
 
-function makeFile(path: string, ctime = 1700000000000): TFile {
+const DEFAULT_TIME = Date.parse("2023-11-14T22:13:20Z");
+
+function makeFile(
+  path: string,
+  ctime = DEFAULT_TIME,
+  mtime = ctime
+): TFile {
   return {
     path,
     extension: "md",
-    stat: { ctime, mtime: ctime, size: 1 },
+    stat: { ctime, mtime, size: 1 },
     basename: path.replace(/\.md$/, ""),
     name: path.split("/").pop() || path,
     parent: null,
@@ -44,16 +50,33 @@ const baseSettings: SyncSettings = {
   includeUnresolved: false,
 };
 
-const PLACEHOLDER_TIME = new Date("2026-09-13T12:00:00Z");
+const unresolvedSettings: SyncSettings = {
+  ...baseSettings,
+  includeUnresolved: true,
+};
 
-function withFakeNow<T>(fn: () => T): T {
-  vi.useFakeTimers();
-  vi.setSystemTime(PLACEHOLDER_TIME);
-  try {
-    return fn();
-  } finally {
-    vi.useRealTimers();
-  }
+const EARLY = { name: "Early", time: Date.parse("2024-01-02T00:00:00Z") };
+const LATE = { name: "Late", time: Date.parse("2024-09-20T00:00:00Z") };
+
+/** Snapshot the placeholder `Missing` gets when each given note links to it. */
+function placeholderFor(
+  linkers: Array<{ name: string; time: number }>,
+  settings: SyncSettings = unresolvedSettings
+): NoteSnapshot | undefined {
+  const files = linkers.map((linker) => makeFile(`${linker.name}.md`, linker.time));
+  const vault = makeVault(files);
+  const cache = makeCache(
+    Object.fromEntries(
+      linkers.map((linker) => [
+        `${linker.name}.md`,
+        [{ link: "Missing", original: "[[Missing]]" }],
+      ])
+    ),
+    files
+  );
+
+  const { snapshot } = buildSnapshot(vault, cache, settings);
+  return snapshot.find((note) => note.filename === "Missing");
 }
 
 describe("buildSnapshot", () => {
@@ -73,7 +96,7 @@ describe("buildSnapshot", () => {
     expect(snapshot).toHaveLength(2);
     expect(snapshot[0]).toEqual({
       filename: "A",
-      createdAt: new Date(1700000000000),
+      createdAt: new Date(DEFAULT_TIME),
       links: ["B"],
     });
     expect(snapshot[1].filename).toBe("B");
@@ -159,25 +182,127 @@ describe("buildSnapshot", () => {
   });
 
   it("creates a placeholder node for each unresolved target when enabled", () => {
-    const a = makeFile("A.md");
+    const linkerTime = Date.parse("2024-03-05T10:00:00Z");
+    const a = makeFile("A.md", linkerTime);
     const vault = makeVault([a]);
     const cache = makeCache(
       { "A.md": [{ link: "Missing", original: "[[Missing]]" }] },
       [a]
     );
 
-    const { snapshot } = withFakeNow(() =>
-      buildSnapshot(vault, cache, { ...baseSettings, includeUnresolved: true })
-    );
+    const { snapshot } = buildSnapshot(vault, cache, unresolvedSettings);
 
     expect(snapshot).toEqual([
-      {
-        filename: "A",
-        createdAt: new Date(1700000000000),
-        links: ["Missing"],
-      },
-      { filename: "Missing", createdAt: PLACEHOLDER_TIME, links: [] },
+      { filename: "A", createdAt: new Date(linkerTime), links: ["Missing"] },
+      { filename: "Missing", createdAt: new Date(linkerTime), links: [] },
     ]);
+  });
+
+  it("derives the earliest linking date regardless of file order", () => {
+    expect(placeholderFor([EARLY, LATE])).toEqual({
+      filename: "Missing",
+      createdAt: new Date(EARLY.time),
+      links: [],
+    });
+    expect(placeholderFor([LATE, EARLY])).toEqual({
+      filename: "Missing",
+      createdAt: new Date(EARLY.time),
+      links: [],
+    });
+  });
+
+  it("inherits an mtime-derived date as-is when the linker has no valid ctime", () => {
+    const mtime = Date.parse("2024-05-01T08:00:00Z");
+    const a = makeFile("A.md", 0, mtime);
+    const vault = makeVault([a]);
+    const cache = makeCache(
+      { "A.md": [{ link: "Missing", original: "[[Missing]]" }] },
+      [a]
+    );
+
+    const { snapshot } = buildSnapshot(vault, cache, unresolvedSettings);
+
+    expect(snapshot).toEqual([
+      { filename: "A", createdAt: new Date(mtime), links: ["Missing"] },
+      { filename: "Missing", createdAt: new Date(mtime), links: [] },
+    ]);
+  });
+
+  it("never dates a placeholder from a note outside the subdirectory", () => {
+    const outsideTime = Date.parse("2020-01-01T00:00:00Z");
+    const insideTime = Date.parse("2024-06-01T00:00:00Z");
+    const outside = makeFile("Notes/Outside.md", outsideTime);
+    const inside = makeFile("Projects/Inside.md", insideTime);
+    const vault = makeVault([outside, inside]);
+    const cache = makeCache(
+      {
+        "Notes/Outside.md": [{ link: "Missing", original: "[[Missing]]" }],
+        "Projects/Inside.md": [{ link: "Missing", original: "[[Missing]]" }],
+      },
+      [outside, inside]
+    );
+
+    const { snapshot } = buildSnapshot(vault, cache, {
+      ...baseSettings,
+      subdir: "Projects",
+      includeUnresolved: true,
+    });
+
+    expect(snapshot.map((note) => note.filename)).toEqual([
+      "Inside",
+      "Missing",
+    ]);
+    expect(snapshot[1].createdAt).toEqual(new Date(insideTime));
+  });
+
+  it("derives the same placeholder date on repeated syncs", () => {
+    // Pinned to the linker's date, so a reintroduced sync-time stamp fails
+    // deterministically rather than only across a millisecond boundary.
+    expect(placeholderFor([LATE, EARLY])?.createdAt).toEqual(
+      new Date(EARLY.time)
+    );
+    expect(placeholderFor([LATE, EARLY])?.createdAt).toEqual(
+      new Date(EARLY.time)
+    );
+  });
+
+  it("names the winning linker once per placeholder in verbose mode", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      placeholderFor([LATE, EARLY], { ...unresolvedSettings, verbose: true });
+
+      // Assert before restoring: mockRestore() clears the recorded calls.
+      const lines = log.mock.calls
+        .map((call) => call.join(" "))
+        .filter((line) => line.includes("Missing"));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain(EARLY.name);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("breaks a tie between equally dated linkers on the linker name", () => {
+    const time = Date.parse("2024-03-05T10:00:00Z");
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      placeholderFor(
+        [
+          { name: "Zeta", time },
+          { name: "Alpha", time },
+        ],
+        { ...unresolvedSettings, verbose: true }
+      );
+
+      const line = log.mock.calls
+        .map((call) => call.join(" "))
+        .find((entry) => entry.includes("Missing"));
+      expect(line).toContain("Alpha");
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("collapses a target linked from two notes into one placeholder", () => {
@@ -192,9 +317,7 @@ describe("buildSnapshot", () => {
       [a, b]
     );
 
-    const { snapshot } = withFakeNow(() =>
-      buildSnapshot(vault, cache, { ...baseSettings, includeUnresolved: true })
-    );
+    const { snapshot } = buildSnapshot(vault, cache, unresolvedSettings);
 
     expect(snapshot.map((s) => s.filename)).toEqual(["A", "B", "Missing"]);
     expect(snapshot[0].links).toEqual(["Missing"]);
@@ -210,9 +333,7 @@ describe("buildSnapshot", () => {
       [a, y]
     );
 
-    const { snapshot } = withFakeNow(() =>
-      buildSnapshot(vault, cache, { ...baseSettings, includeUnresolved: true })
-    );
+    const { snapshot } = buildSnapshot(vault, cache, unresolvedSettings);
 
     expect(snapshot.map((s) => s.filename)).toEqual(["A", "Same"]);
     expect(snapshot[0].links).toEqual(["Same"]);
@@ -227,18 +348,16 @@ describe("buildSnapshot", () => {
       [a, outside]
     );
 
-    const { snapshot } = withFakeNow(() =>
-      buildSnapshot(vault, cache, {
-        ...baseSettings,
-        subdir: "Projects",
-        includeUnresolved: true,
-      })
-    );
+    const { snapshot } = buildSnapshot(vault, cache, {
+      ...baseSettings,
+      subdir: "Projects",
+      includeUnresolved: true,
+    });
 
     expect(snapshot).toEqual([
       {
         filename: "A",
-        createdAt: new Date(1700000000000),
+        createdAt: new Date(DEFAULT_TIME),
         links: ["B"],
       },
     ]);
@@ -300,7 +419,7 @@ describe("runSync", () => {
     const result = await runSync(vault, cache, store, baseSettings);
 
     expect(store.syncNotes).toHaveBeenCalledWith([
-      { filename: "A", createdAt: new Date(1700000000000), links: [] },
+      { filename: "A", createdAt: new Date(DEFAULT_TIME), links: [] },
     ]);
     expect(result).toEqual({ inserted: 1, updated: 0, deleted: 0, errors: [] });
   });
