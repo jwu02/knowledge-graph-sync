@@ -70,3 +70,17 @@ Key seams that make this testable outside Obsidian:
 
 - Unit tests mock Obsidian types with `as unknown as TFile`/`Vault`/`MetadataCache` casts — see the `makeFile`/`makeVault`/`makeCache` helpers in `tests/sync.test.ts` and `tests/link-resolver.test.ts`.
 - `tests/mongo.test.ts` is an integration test that spins up `mongodb-memory-server` (downloads a MongoDB binary on first run) and asserts actual collection state.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues in `jwu02/knowledge-graph-sync`; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles, label strings equal to their names (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
