@@ -20,13 +20,15 @@ The authoritative design spec is `docs/superpowers/specs/2026-08-13-obsidian-syn
 
 ```bash
 npm run dev         # esbuild watch mode → main.js (inline sourcemap)
-npm run build       # tsc -noEmit typecheck, then production esbuild bundle → main.js
+npm run build       # tsc -noEmit -skipLibCheck typecheck, then production esbuild bundle → main.js
 npm test            # vitest run (all test files)
 npm run test:watch  # vitest watch mode
 npx vitest run tests/sync.test.ts   # run a single test file
 ```
 
 - `main.js` is git-ignored and generated; never edit it by hand.
+- **`main.js` goes stale silently, and a stale bundle is indistinguishable from a source bug.** Nothing regenerates it unless `npm run dev` or `npm run build` is running, and the plugin is loaded in place (the vault symlinks `.obsidian/plugins/knowledge-graph-sync` at this repo). If a change seems missing in Obsidian, check the artifact before reading the source: compare `stat -f '%Sm' main.js` against the newest `.ts` file, or `grep -c "<a symbol the change introduced>" main.js` — zero hits means rebuild, not a bug. A rebuild stays invisible until Obsidian is reloaded (Cmd+R); the plugin does not hot-reload.
+- `tsc` is run with `-skipLibCheck`, which suppresses 5 pre-existing errors in `node_modules` declarations — a bare `npx tsc --noEmit` reports them, but `npm run build` exits 0. Don't treat those 5 as a regression.
 - The Obsidian plugin lifecycle and settings UI are tested manually in Obsidian — only `sync.ts`, `link-resolver.ts`, `date-util.ts`, `path-util.ts`, `env-config.ts`, and `mongo.ts` have automated tests.
 
 ## Architecture
