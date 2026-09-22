@@ -35,6 +35,8 @@ knowledge-graph-sync/
 ├── esbuild.config.mjs     # bundle main.ts + MongoDB driver
 ├── main.ts                # Plugin class, command, settings tab
 ├── settings.ts            # Settings schema + defaults
+├── env-config.ts          # .env parsing and settings precedence
+├── .env.example           # Template for the local, git-ignored .env
 ├── sync.ts                # Sync engine: scan → resolve → bulk write
 ├── mongo.ts               # MongoDB client wrapper
 ├── link-resolver.ts       # Transform metadataCache links → target filenames
@@ -66,7 +68,7 @@ Settings fields:
 - Include notes that don't exist yet toggle (default off) — see [Placeholder nodes](#placeholder-nodes)
 - Verbose logging toggle
 
-Stored in Obsidian’s plugin data JSON.
+Stored in Obsidian’s plugin data JSON, and overridable per key by a local `.env` file in the plugin directory (see [Addendum: .env configuration](#addendum-env-configuration-2026-09-22)).
 
 ### `runSync(vault, metadataCache, settings)` (sync.ts)
 
@@ -176,3 +178,62 @@ The Obsidian plugin lifecycle and settings UI will be tested manually in Obsidia
 ## Open Questions
 
 None — all architectural and behavioral questions have been resolved and are recorded above.
+
+## Addendum: .env configuration (2026-09-22)
+
+**Status:** Approved
+
+### Goal
+
+Let a local, git-ignored `.env` file in the plugin directory supply settings, so a machine's configuration (connection string in particular) lives in one file that never enters git, instead of only in Obsidian's `data.json`.
+
+### Precedence
+
+Three layers, resolved **per key**:
+
+```
+built-in defaults  <  persisted settings (settings UI → data.json)  <  .env
+```
+
+`.env` is the source of truth for any key it defines. Keys it omits keep whatever the settings UI saved, then the built-in default. A malformed or partly-filled `.env` never takes the plugin down; problems are reported as console warnings and the sync proceeds with the remaining layers.
+
+The three layers are kept as separate pieces of state (`persistedSettings`, `envConfig`, and the derived effective settings) rather than merged into one object, so that:
+
+- `saveSettings()` writes only the UI-owned layer — env values are never copied into `data.json`, which would turn one source of truth into two;
+- removing `.env` cleanly restores the previously saved UI value instead of an empty string.
+
+### Keys
+
+| Key | Setting | Notes |
+| --- | --- | --- |
+| `MONGO_URI` | MongoDB connection string | Required for a sync to run; carries `?query=params` unquoted |
+| `DB_NAME` | Database name | |
+| `SUBDIR` | Vault subdirectory | Empty value means "not set", not "sync whole vault" |
+| `INCLUDE_UNRESOLVED` | Include notes that don't exist yet | Boolean |
+| `VERBOSE` | Verbose logging | Boolean |
+
+Booleans accept `true`, `on`, or `1` (case-insensitive) as true; anything else is false.
+
+### Format
+
+One `KEY=VALUE` per line. Blank lines and `#` comments are skipped, values are trimmed, matching surrounding quotes are stripped, and only the first `=` separates key from value (so connection strings work unquoted). An empty value means the key is not set. Unknown keys are ignored with a warning.
+
+No parser dependency is used — the format needed is flat `KEY=VALUE`, and the edge cases are covered by unit tests.
+
+### Location and timing
+
+The file lives in the plugin directory, next to `data.json` (`.obsidian/plugins/knowledge-graph-sync/.env`), resolved via `FileSystemAdapter.getBasePath()` + `manifest.dir`. It is read:
+
+- at plugin load,
+- immediately before every sync (so an edit applies to the next sync without reloading the plugin),
+- when the settings tab is displayed.
+
+A missing `.env` is the normal setup and yields exactly the pre-`.env` behavior. `.env` is listed in `.gitignore`; a committed `.env.example` documents the format with placeholder values.
+
+### Settings UI
+
+Settings defined by `.env` are shown read-only, with a banner naming the `.env` path; the other settings remain editable and are saved as before. The UI must not offer an edit that the next read would silently discard.
+
+### Testing
+
+`env-config.ts` is unit-tested like the other non-Obsidian modules: parser cases (comments, blanks, CRLF, quotes, `=` in values, empty values, malformed lines), key mapping and boolean coercion, unknown-key warnings, precedence per key, and filesystem cases (missing file, unreadable path, mixed valid/invalid file).

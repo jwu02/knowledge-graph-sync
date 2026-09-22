@@ -42,12 +42,15 @@ knowledge-graph-sync/
 ├── link-resolver.ts        # Obsidian metadataCache → link filenames
 ├── path-util.ts            # filename/extension helpers
 ├── date-util.ts            # ctime/mtime fallback helper
+├── env-config.ts           # .env parsing + settings precedence (Task 8)
 ├── types.ts                # Shared TypeScript interfaces
+├── .env.example            # Committed template for the ignored .env
 ├── README.md
 └── tests/
     ├── sync.test.ts
     ├── link-resolver.test.ts
     ├── mongo.test.ts
+    ├── env-config.test.ts
     └── date-util.test.ts
 ```
 
@@ -1255,6 +1258,49 @@ Expected: all tests pass.
 git add .gitignore esbuild.config.mjs README.md
 git commit -m "chore: production build config and documentation"
 ```
+
+---
+
+### Task 8: .env Configuration
+
+Implemented 2026-09-22. Spec: [Addendum: .env configuration](../specs/2026-08-13-obsidian-sync-design.md#addendum-env-configuration-2026-09-22).
+
+**Files:**
+
+- Create: `env-config.ts`, `tests/env-config.test.ts`, `.env.example`, `.env` (local only)
+- Modify: `.gitignore`, `main.ts`, `settings.ts`, `README.md`, `CLAUDE.md`
+
+- [ ] **Step 1: Ignore `.env` before creating it**
+
+Add `.env` to `.gitignore`. Verify: `git check-ignore -v .env` → `.gitignore:5:.env`. `.env.example` must stay tracked — the pattern has no wildcard, so it does not match.
+
+- [ ] **Step 2: Write `env-config.ts`**
+
+Exports: `parseEnvFile`, `envConfigFromEntries`, `effectiveSettings`, `readEnvConfig`, `EMPTY_ENV_CONFIG`, and the `EnvConfig` type (`settings`, `managedKeys`, `warnings`). No parser dependency — flat `KEY=VALUE` only. `readEnvConfig` treats `ENOENT` as "no `.env`" and converts every other error into a warning; it never throws.
+
+- [ ] **Step 3: Test the module**
+
+Run: `npx vitest run tests/env-config.test.ts`
+
+Expected: 21 passing — parser cases (comments, blanks, CRLF, quotes, `=` in values, empty values, malformed lines), key mapping and boolean coercion, unknown-key warnings, per-key precedence, and filesystem cases (missing file, unreadable path, mixed valid/invalid file).
+
+- [ ] **Step 4: Wire `main.ts`**
+
+Keep the layers separate: `persistedSettings` (UI-owned, what `saveSettings()` writes), `envConfig` (never persisted), and `getEffectiveSettings()` = defaults < persisted < env. Read `.env` in `loadSettings()`, at the top of `performSync()`, and from the settings tab. `getMongoStore(settings)` must take the **effective** settings, or the client would connect with the persisted URI while the sync ran with the env one.
+
+- [ ] **Step 5: Make the settings tab env-aware**
+
+Banner naming the `.env` path, and `.setDisabled(true)` on each control whose key `.env` defines, displaying the effective value. Keys `.env` does not define stay editable and save as before.
+
+- [ ] **Step 6: Create `.env` and `.env.example`**
+
+`.env.example` is committed and documents all five keys. The local `.env` sets `MONGO_URI`, `DB_NAME`, `SUBDIR`, `INCLUDE_UNRESOLVED`, and deliberately omits `VERBOSE` so the debugging toggle stays live in the UI.
+
+- [ ] **Step 7: Verify**
+
+Run: `npm test` then `npm run build`
+
+Expected: all tests pass; `tsc -noEmit` clean; `main.js` still bundles the MongoDB driver (not in `external`).
 
 ---
 

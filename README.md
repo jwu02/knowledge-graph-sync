@@ -10,6 +10,8 @@ Obsidian plugin that syncs a minimal metadata snapshot of your vault to a MongoD
 - **Include notes that don't exist yet** — optional; off by default. See below.
 - **Verbose logging** — log date fallbacks to the developer console
 
+Any of these can also be supplied by a local `.env` file — see [Setting values with .env](#setting-values-with-env).
+
 ### Include notes that don't exist yet
 
 When a note links to `[[Something You Haven't Written]]`, the link normally disappears from the sync: no edge, no node. Turn this on and the plugin instead keeps the edge and creates a **placeholder node** for the target — a document with that name, no outgoing links, and the sync time as its `createdAt` — so referenced-but-unwritten notes show up in the graph.
@@ -19,12 +21,37 @@ When a note links to `[[Something You Haven't Written]]`, the link normally disa
 - Writing the missing note later replaces its placeholder on the next sync, since the name is the document key.
 - Turning the setting back off deletes the placeholders on the next sync.
 
+## Setting values with .env
+
+A `.env` file in the plugin folder can supply settings, so a connection string lives in one git-ignored file instead of only in Obsidian’s `data.json`. Copy `.env.example` to `.env` next to it (`.obsidian/plugins/knowledge-graph-sync/.env`) and fill it in.
+
+| Key | Setting |
+| --- | --- |
+| `MONGO_URI` | MongoDB connection string |
+| `DB_NAME` | Database name |
+| `SUBDIR` | Vault subdirectory |
+| `INCLUDE_UNRESOLVED` | Include notes that don’t exist yet |
+| `VERBOSE` | Verbose logging |
+
+```bash
+MONGO_URI=mongodb+srv://user:password@cluster.example.mongodb.net/?appName=Cluster0
+DB_NAME=activity-telemetry
+SUBDIR=02 Knowledge
+INCLUDE_UNRESOLVED=on
+```
+
+- **`.env` wins per key.** Precedence is built-in defaults, then settings saved in the UI, then `.env` — so a key you leave out of `.env` keeps whatever the settings tab saved. Settings that `.env` defines appear read-only in the settings tab, with a banner naming the file.
+- **Format** is one `KEY=VALUE` per line. Blank lines and `#` comments are ignored; quotes around a value are optional; only the first `=` separates key from value, so connection strings with `?query=params` work unquoted. Booleans accept `true`, `on`, or `1` as true — anything else is false. An empty value means “not set here”, and unknown keys are ignored with a warning in the developer console.
+- **Reloading** happens at plugin load and before every sync, so an edit applies to the next sync without restarting Obsidian.
+- **No `.env`** is the normal case: the plugin behaves exactly as if the file didn’t exist. Deleting it restores the values saved in the settings tab.
+- `.env` is git-ignored; it is never copied into `data.json`.
+
 ## Usage
 
 1. Install dependencies: `npm install`
 2. Build: `npm run build`
 3. Copy `manifest.json`, `main.js`, and `versions.json` to your vault’s `.obsidian/plugins/knowledge-graph-sync/` folder.
-4. Open Obsidian, enable the plugin, configure settings.
+4. Open Obsidian, enable the plugin, configure settings — or copy `.env.example` to `.env` in the plugin folder instead.
 5. Run **"Sync knowledge graph to MongoDB"** from the command palette.
 
 ## Testing

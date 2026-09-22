@@ -1,11 +1,17 @@
-import { Plugin, Notice } from "obsidian";
+import { FileSystemAdapter, Notice, Plugin, normalizePath } from "obsidian";
 import { DEFAULT_SETTINGS, KnowledgeGraphSyncSettingTab } from "./settings";
+import { EMPTY_ENV_CONFIG, effectiveSettings, readEnvConfig } from "./env-config";
+import type { EnvConfig } from "./env-config";
 import { MongoStore } from "./mongo";
 import { runSync } from "./sync";
 import type { SyncSettings } from "./types";
 
 export default class KnowledgeGraphSyncPlugin extends Plugin {
-  settings: SyncSettings;
+  /** Values the settings UI owns; this is what gets saved to data.json. */
+  persistedSettings: SyncSettings;
+  /** Values read from the plugin directory's .env file, if there is one. */
+  envConfig: EnvConfig = EMPTY_ENV_CONFIG;
+
   private mongoStore: MongoStore | null = null;
   private mongoStoreKey: string | null = null;
 
@@ -28,15 +34,53 @@ export default class KnowledgeGraphSyncPlugin extends Plugin {
     this.mongoStore = null;
   }
 
-  private async getMongoStore(): Promise<MongoStore> {
-    const key = `${this.settings.mongoUri}|${this.settings.dbName}`;
+  /**
+   * The settings a sync actually runs with. Precedence per key: built-in
+   * defaults, then values saved in the settings UI, then .env.
+   */
+  getEffectiveSettings(): SyncSettings {
+    return effectiveSettings(
+      DEFAULT_SETTINGS,
+      this.persistedSettings,
+      this.envConfig.settings
+    );
+  }
+
+  /** Absolute path of the plugin's .env file, or null if it can't be resolved. */
+  getEnvPath(): string | null {
+    // Only desktop adapters expose a real filesystem path; isDesktopOnly is set
+    // in the manifest, but guard anyway so a missing .env is never fatal.
+    const adapter = this.app.vault.adapter as FileSystemAdapter;
+    if (typeof adapter?.getBasePath !== "function") {
+      return null;
+    }
+    if (!this.manifest.dir) {
+      return null;
+    }
+    return normalizePath(`${adapter.getBasePath()}/${this.manifest.dir}/.env`);
+  }
+
+  /**
+   * Re-reads .env. A missing file is the normal setup and yields no settings;
+   * a malformed one only produces console warnings, never a failed sync.
+   */
+  reloadEnvConfig(): void {
+    const envPath = this.getEnvPath();
+    this.envConfig = envPath ? readEnvConfig(envPath) : EMPTY_ENV_CONFIG;
+    for (const warning of this.envConfig.warnings) {
+      console.warn("[Knowledge Graph Sync]", warning);
+    }
+  }
+
+  private async getMongoStore(settings: SyncSettings): Promise<MongoStore> {
+    const key = `${settings.mongoUri}|${settings.dbName}`;
     if (this.mongoStore && this.mongoStoreKey !== key) {
       await this.mongoStore.close();
       this.mongoStore = null;
       this.mongoStoreKey = null;
     }
     if (!this.mongoStore) {
-      this.mongoStore = new MongoStore(this.settings.mongoUri, this.settings.dbName);
+      this.mongoStore = new MongoStore(settings.mongoUri, settings.dbName);
       this.mongoStoreKey = key;
       await this.mongoStore.connect();
     }
@@ -45,12 +89,15 @@ export default class KnowledgeGraphSyncPlugin extends Plugin {
 
   private async performSync(): Promise<void> {
     try {
-      const mongoStore = await this.getMongoStore();
+      // Re-read .env so an edit applies to the very next sync.
+      this.reloadEnvConfig();
+      const settings = this.getEffectiveSettings();
+      const mongoStore = await this.getMongoStore(settings);
       const result = await runSync(
         this.app.vault,
         this.app.metadataCache,
         mongoStore,
-        this.settings
+        settings
       );
 
       if (result.errors.length > 0) {
@@ -73,10 +120,12 @@ export default class KnowledgeGraphSyncPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.persistedSettings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.reloadEnvConfig();
   }
 
   async saveSettings(): Promise<void> {
-    await this.saveData(this.settings);
+    // Only the UI-owned layer is persisted; .env values are never copied here.
+    await this.saveData(this.persistedSettings);
   }
 }

@@ -14,7 +14,7 @@ The data contract with the website — one document per markdown note, in the `n
   links: string[] }   // outgoing wikilink targets as basenames (same format)
 ```
 
-The authoritative design spec is `docs/superpowers/specs/2026-08-13-obsidian-sync-design.md`; the implementation plan is `docs/superpowers/plans/2026-08-13-obsidian-sync.md`. Keep both in sync when behavior changes.
+The authoritative design spec is `docs/superpowers/specs/2026-08-13-obsidian-sync-design.md`; the implementation plan is `docs/superpowers/plans/2026-08-13-obsidian-sync.md`. Keep both in sync when behavior changes. Decisions whose trade-offs aren't obvious from the code are recorded in `docs/adr/`.
 
 ## Commands
 
@@ -27,7 +27,7 @@ npx vitest run tests/sync.test.ts   # run a single test file
 ```
 
 - `main.js` is git-ignored and generated; never edit it by hand.
-- The Obsidian plugin lifecycle and settings UI are tested manually in Obsidian — only `sync.ts`, `link-resolver.ts`, `date-util.ts`, `path-util.ts`, and `mongo.ts` have automated tests.
+- The Obsidian plugin lifecycle and settings UI are tested manually in Obsidian — only `sync.ts`, `link-resolver.ts`, `date-util.ts`, `path-util.ts`, `env-config.ts`, and `mongo.ts` have automated tests.
 
 ## Architecture
 
@@ -35,6 +35,7 @@ Data flow on the single manual sync command ("Sync knowledge graph to MongoDB"):
 
 ```
 main.ts (plugin command)
+  → getEffectiveSettings() in main.ts  // defaults < persisted settings (data.json) < .env
   → runSync() in sync.ts          // orchestrator
       → buildSnapshot() in sync.ts  // pure-ish: Vault + MetadataCache → NoteSnapshot[]
           → resolveCreatedAt() in date-util.ts   // stat.ctime → stat.mtime → now
@@ -49,6 +50,7 @@ Key seams that make this testable outside Obsidian:
 - **`main.ts` owns the Mongo client lifecycle.** `getMongoStore()` creates a lazy `MongoStore` singleton keyed on `${mongoUri}|${dbName}`, closing and recreating it when settings change, on sync failure, and on `onunload()`. `sync.ts` never touches `MongoClient` directly.
 - **`mongo.ts` is a thin wrapper.** `syncNotes(snapshot)` does a `bulkWrite` of `replaceOne({ filename }, note, { upsert: true })`, then `deleteMany({ filename: { $nin: snapshotFilenames } })`. The collection name is hardcoded to `notes`.
 - **`types.ts` holds the shared contracts** (`NoteSnapshot`, `SyncSettings`, `SyncResult`) used by every module.
+- **`env-config.ts` owns the `.env` layer.** `readEnvConfig(path)` returns an `EnvConfig` (`settings`, `managedKeys`, `warnings`) and never throws: a missing file is the normal setup, and every other failure becomes a warning. `main.ts` resolves the path via `FileSystemAdapter.getBasePath()` + `manifest.dir` and re-reads it at load, before each sync, and when the settings tab renders.
 
 ## Behavior to preserve (non-obvious)
 
@@ -57,6 +59,7 @@ Key seams that make this testable outside Obsidian:
 - **Basename-only node ids.** `filename` and `links` are note basenames (directory and `.md` stripped). Two notes with the same basename in different folders produce the same node id, and one overwrites the other in MongoDB.
 - **Only markdown wikilinks sync.** `resolveTargets` uses `metadataCache.getFirstLinkpathDest(link.link, file.path)`; non-`.md` targets (images, PDFs, `![[embeds]]`) are always dropped. Links pointing outside the configured subdirectory are kept as-is, which can create dangling edges in the graph.
 - **Unresolved targets are opt-in.** By default unresolved links are dropped from `links` entirely. With `settings.includeUnresolved`, they are kept as edges and one placeholder `NoteSnapshot` (`links: []`, `createdAt` = one timestamp shared by the whole sync) is appended per unique unresolved target. Placeholders are ordinary snapshot entries, so the existing `deleteMany` removes them on the first sync after the setting is turned off. A real note always wins a basename — including one outside the subdirectory, which resolves rather than being unresolved. Unresolved link text qualifies only if its basename is extensionless or ends in `.md`; `[[diagram.png]]` and `[[v1.2]]` are dropped.
+- **`.env` beats the settings UI, per key.** Precedence is built-in defaults < persisted settings (`data.json`, written by the settings tab) < `.env` in the plugin directory. Keep the layers physically separate — `persistedSettings`, `envConfig`, and `getEffectiveSettings()` in `main.ts`. Merging them into one object would make `saveSettings()` copy env values into `data.json` (two sources of truth) and make deleting `.env` wipe a setting instead of restoring the UI value. Settings `.env` defines render read-only in the tab, and `getMongoStore()` takes the effective settings so the client and the sync can never disagree.
 - **Date resolution.** `stat.ctime` is the preferred creation time; falls back to `stat.mtime`, then current date, with verbose-mode console logging for fallbacks.
 
 ## Build constraints
